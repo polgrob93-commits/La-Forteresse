@@ -1,45 +1,133 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>La Forteresse - Proto</title>
-  <style>
-    :root { --grid: 9; }
-    body {
-      margin:0; background:#111; color:#eee;
-      display:flex; justify-content:center; align-items:center; min-height:100vh;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-    }
-    .wrap { width:min(92vmin, 900px); }
-    #board {
-      position:relative;
-      width:100%; aspect-ratio:1/1;
-      background:url('plateau1.png.png') center/cover no-repeat;
-      border:2px solid #fff; border-radius:12px; overflow:hidden;
-      box-shadow:0 10px 30px rgba(0,0,0,.4);
-      user-select:none;
-    }
-       /* Grille dessinée par-dessus (test visuel) */
-    #board::after{
-      content:"";
-      position:absolute; inset:0;
-      pointer-events:none;
-      background-image:
-        repeating-linear-gradient(
-          to right,
-          rgba(255,0,0,.4) 0px,
-          rgba(255,0,0,.4) 1px,
-          transparent 1px,
-          transparent calc(100% / var(--grid))
-        ),
-        repeating-linear-gradient(
-          to bottom,
-          rgba(255,0,0,.4) 0px,
-          rgba(255,0,0,.4) 1px,
-          transparent 1px,
-          transparent calc(100% / var(--grid))
-        );
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>La Forteresse – Proto simple</title>
+<style>
+  :root { --grid: 9; }
+  html, body {
+    height:100%; margin:0; background:#111; color:#eee;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 92vmin; margin: 24px auto; }
+  #board {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: url('plateau12.png') center/cover no-repeat;
+    border: 2px solid #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    user-select: none;
+  }
+  /* calque des cases (81 divs) */
+  #cells {
+    position:absolute; inset:0;
+    display:grid;
+    grid-template-columns: repeat(9, 1fr);
+    grid-template-rows: repeat(9, 1fr);
+  }
+  .cell {
+    border: 1px solid rgba(255,255,255,.28); /* lignes visibles */
+    box-sizing: border-box;
+  }
+  /* calque clics + surbrillance */
+  #hit { position:absolute; inset:0; cursor:pointer; }
+  #highlight {
+    position:absolute; border:2px solid rgba(255,255,255,.85);
+    pointer-events:none; display:none;
+    transform: translate(-1px,-1px); /* compense la bordure */
+  }
+  .log {
+    margin-top:10px; background:#1a1f2c; border:1px solid #2a3142;
+    padding:10px; border-radius:10px; font-size:14px;
+    min-height: 36px;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="board">
+      <div id="cells"></div>
+      <div id="hit" aria-label="zone interactive"></div>
+      <div id="highlight"></div>
+    </div>
+    <div class="log" id="log">Clique sur une case pour voir ses coordonnées (A1…I9).</div>
+  </div>
 
- 
+<script>
+  const GRID = 9;
+  const COLS = "ABCDEFGHI";
+
+  const board = document.getElementById('board');
+  const cells = document.getElementById('cells');
+  const hit = document.getElementById('hit');
+  const highlight = document.getElementById('highlight');
+  const logEl = document.getElementById('log');
+
+  // 1) Crée 81 cellules visibles (grille)
+  function buildGrid(){
+    cells.innerHTML = "";
+    for(let i=0;i<GRID*GRID;i++){
+      const d = document.createElement('div');
+      d.className = 'cell';
+      cells.appendChild(d);
+    }
+  }
+
+  // 2) Helpers coordonnées
+  function toAlg(c,r){ return COLS[c] + (r+1); } // (0,0)->A1, (8,8)->I9
+
+  function cellFromEvent(e){
+    const rect = board.getBoundingClientRect();
+    const size = rect.width;               // carré
+    const cell = size / GRID;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    let c = Math.floor(x / cell);          // 0..8 (gauche->droite)
+    let rTop = Math.floor(y / cell);       // 0..8 (haut->bas)
+    let r = (GRID-1) - rTop;               // 0..8 (bas->haut  = rangée 1..9)
+
+    // clamp
+    c = Math.max(0, Math.min(GRID-1, c));
+    r = Math.max(0, Math.min(GRID-1, r));
+
+    return { c, r, cell, rect };
+  }
+
+  function placeHighlight(c,r, cell){
+    // convertir r (0=bas) en coord écran (0=haut)
+    const yTop = (GRID-1 - r) * cell;
+    const x = c * cell;
+    highlight.style.left = x + "px";
+    highlight.style.top  = yTop + "px";
+    highlight.style.width  = cell + "px";
+    highlight.style.height = cell + "px";
+    highlight.style.display = "block";
+  }
+
+  // 3) Interactions
+  hit.addEventListener('mousemove', (e)=>{
+    const {c,r,cell} = cellFromEvent(e);
+    placeHighlight(c,r,cell);
+  });
+  hit.addEventListener('mouseleave', ()=>{
+    highlight.style.display = "none";
+  });
+  hit.addEventListener('click', (e)=>{
+    const {c,r} = cellFromEvent(e);
+    logEl.textContent = "Clic sur " + toAlg(c,r) + " (col=" + c + ", ligne=" + r + ")";
+  });
+
+  // 4) Init + ajuster si redimensionnement
+  buildGrid();
+  window.addEventListener('resize', ()=>{
+    // on cache la surbrillance pour éviter un décalage visuel pendant le resize
+    highlight.style.display = "none";
+  });
+</script>
+</body>
+</html>
