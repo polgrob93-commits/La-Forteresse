@@ -29,10 +29,15 @@
     grid-template-columns: repeat(9, 1fr);
     grid-template-rows: repeat(9, 1fr);
   }
-.cell {
-  border: 2px solid #000;   /* noir pur */
-  box-sizing: border-box;
-}
+  .cell {
+    border-top: 2px solid #000;
+    border-left: 2px solid #000;
+    box-sizing: border-box;
+  }
+  #cells {
+    border-right: 2px solid #000;
+    border-bottom: 2px solid #000;
+  }
   /* calque clics + surbrillance */
   #hit { position:absolute; inset:0; cursor:pointer; }
   #highlight {
