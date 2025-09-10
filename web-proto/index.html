@@ -337,8 +337,12 @@
         if(card.t==='MOVE' && state.inProgress && state.inProgress.mode==='MOVE' && state.inProgress.cardId===card.id && !state.gameOver){
           const cancelBtn=document.createElement('button'); cancelBtn.className='btn playbtn'; cancelBtn.style.marginTop='4px'; cancelBtn.textContent='Défausser';
           cancelBtn.addEventListener('click', ()=>{
-            // Terminer le déplacement sans utiliser tous les pas
-            commitMoveInProgress();
+            // Si aucun pas n'a été effectué, annuler sans défausser, sinon défausser
+            if(state.inProgress && state.inProgress.remaining === state.inProgress.initial){
+              cancelMoveCard();
+            } else {
+              commitMoveInProgress();
+            }
             renderBoard();
           });
           box.appendChild(cancelBtn);
@@ -434,8 +438,20 @@
     // Respecter la limite de cartes jouées par tour (3 + bonus éventuel)
     const limit = 3 + (state.flags.extraCard ? state.flags.extraCard : 0);
     if(state.played >= limit){ log('Limite de cartes jouées atteinte.'); return; }
-    // Si un déplacement est en cours, le conclure avant de jouer une autre carte
-    if(state.inProgress){ commitMoveInProgress(); }
+    // Si un déplacement est en cours, le conclure ou l'annuler avant de jouer une autre carte
+    if(state.inProgress){
+      if(state.inProgress.mode==='MOVE'){
+        const info = state.inProgress;
+        // Si aucun pas n'a été effectué (remaining == initial), on annule simplement la carte
+        if(info.remaining === info.initial){
+          cancelMoveCard();
+        } else {
+          commitMoveInProgress();
+        }
+      } else {
+        commitMoveInProgress();
+      }
+    }
     const P=state.pieces[color]; const card=P.hand[idx];
     if(!card) return;
     switch(card.t){
@@ -454,8 +470,10 @@
     const unit=findUnit(color, state.selected.id);
     if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
     const P=state.pieces[color]; const cardObj=P.hand[idx]; const cardId=cardObj.id;
-    state.inProgress={mode:'MOVE', color, unitId:unit.id, cardId, remaining:steps};
+    // Démarrer un déplacement : stocker aussi le nombre de pas initial pour détecter si aucun pas n'a été effectué
+    state.inProgress={mode:'MOVE', color, unitId:unit.id, cardId, remaining:steps, initial:steps};
     applyHighlights();
+    renderHands(); // mettre à jour l'interface pour afficher le bouton Défausser
     log(`Carte Déplacement ${steps}: cliquez les cases vertes pour chaque pas.`);
   }
   function commitMoveInProgress(){
@@ -466,6 +484,16 @@
     state.played++;
     state.inProgress=null;
     applyHighlights(); renderHands(); updateDeckUI();
+  }
+
+  // Annuler un déplacement en cours sans le défausser (aucun pas effectué)
+  function cancelMoveCard(){
+    if(!state.inProgress || state.inProgress.mode!=='MOVE') return;
+    // remettre simplement l'état sans défausser la carte, ni augmenter le compteur de cartes jouées
+    state.inProgress = null;
+    applyHighlights();
+    renderHands();
+    // pas de changement dans la main ou la défausse
   }
 
   function commitBlockInProgress(cell){
@@ -670,8 +698,12 @@
     if(state.inProgress && state.inProgress.mode==='MOVE'){
       const info=state.inProgress; const unit=findUnit(info.color, info.unitId);
       if(!unit || !unit.cell) return;
-      // only accept valid green cells
-      if(!cellEl.classList.contains('move-ok')) return;
+      // Si clic sur une case qui n'est pas une destination valide
+      if(!cellEl.classList.contains('move-ok')){
+        // Si aucun pas effectué, annuler le déplacement
+        if(info.remaining === info.initial){ cancelMoveCard(); }
+        return;
+      }
       const from=unit.cell; unit.cell=alg;
       // update selection cell for highlight
       if(state.selected && state.selected.color===info.color && state.selected.id===unit.id){ state.selected.cell=alg; }
