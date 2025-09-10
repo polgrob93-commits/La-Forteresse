@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>La Forteresse — Proto (v0.2-fix MOVE)</title>
+  <title>La Forteresse — Prototype final</title>
   <style>
     :root{ --grid:9; --bg:#0f1116; --panel:#151a23; --text:#e8eef7; --muted:#8ea0bf;
            --tile:#1b2230; --tile2:#1f2736; --orange:#e6a23c; --blue:#2c7be5; --red:#e55353; }
-    *{box-sizing:border-box} html,body{height:100%}
+    *{box-sizing:border-box}
+    html,body{height:100%}
     body{margin:0;background:linear-gradient(120deg,#0f1116,#0c111a);color:var(--text);
          font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
     .app{max-width:1240px;margin:14px auto;padding:0 12px;display:grid;gap:12px;
@@ -36,19 +37,25 @@
     .cell.orange{outline:2px solid var(--orange)}
     .cell.bzone{box-shadow:inset 0 0 0 2px rgba(44,123,229,.35)}
     .cell.rzone{box-shadow:inset 0 0 0 2px rgba(229,83,83,.35)}
-    .cell.blocked::after{content:'';position:absolute;inset:6px;border-radius:6px;background:repeating-linear-gradient(45deg,#3a4356 0 6px,#151b27 6px 12px);opacity:.8;outline:2px solid #3a445a}
     .coord{position:absolute;right:4px;bottom:4px;font-size:10px;color:#8a94ab;opacity:.7}
+
+    /* Highlight classes */
     .cell.hl { outline:3px solid #fff; outline-offset:-3px; }
     .cell.move-ok { box-shadow:inset 0 0 0 3px rgba(111, 255, 145, .9); cursor:pointer; }
     .cell.move-bad{ box-shadow:inset 0 0 0 3px rgba(255, 111, 111, .7); }
     .cell.target-ok{ box-shadow:inset 0 0 0 3px rgba(255, 215, 111, .9); cursor:pointer; }
 
-    .fort, .piece{width:75%;height:75%;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#0b0f16;border:2px solid rgba(0,0,0,.35);box-shadow:0 6px 12px rgba(0,0,0,.35)}
-    .fort{border-radius:12px;width:82%;height:82%;font-weight:800}
-    .fort.blue{background:linear-gradient(180deg,#afd3ff,#7ab6ff)}
-    .fort.red{background:linear-gradient(180deg,#ffb1b1,#ff7e7e)}
+    /* blocks: small brown circles */
+    .block{width:40%;height:40%;border-radius:50%;background:linear-gradient(180deg,#5a4a3f,#3e3028);}
+
+    /* Pieces, forts, blocks */
+    .piece, .fort, .block{display:grid;place-items:center;font-weight:700;color:#0b0f16;border:2px solid rgba(0,0,0,.35);box-shadow:0 6px 12px rgba(0,0,0,.35)}
+    .piece{width:70%;height:70%;border-radius:50%}
+    .fort{width:80%;height:80%;border-radius:12px;font-weight:800}
     .piece.blue{background:linear-gradient(180deg,#3c9cff,#2c7be5)}
     .piece.red{background:linear-gradient(180deg,#ff6767,#e55353)}
+    .fort.blue{background:linear-gradient(180deg,#afd3ff,#7ab6ff)}
+    .fort.red{background:linear-gradient(180deg,#ffb1b1,#ff7e7e)}
     .hp{position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);font-size:11px;color:#cfd7ea;background:#121722;border:1px solid #1d2433;border-radius:8px;padding:2px 6px}
 
     .hand{display:grid;gap:8px}
@@ -179,17 +186,16 @@
     turn:0, active:'blue', phase:'préparation',
     firstTurnMode:true, firstOrder:null, immunity:{p1:true,p2:true},
     blocks:new Set(),
-    tiles:{},
-    selected:null, // {color,id}
+    tiles:{}, // cell -> {key,kind,revealed}
+    selected:null,
     played:0,
     freeMoveRemaining:0,
-    turnRevealedTile:false, // une seule tuile révélée par tour
+    inProgress:null, // {mode:'MOVE', color, unitId, cardId, remaining}
     pieces:{
       blue:{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
       red :{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
     },
-    flags:{},
-    input:{ mode:null } // {mode:'MOVE_CARD', remaining, color, handIdx, unitId}
+    flags:{} // e.g. extraCard, drawTo4, noMagic, etc.
   };
 
   // ===== Helpers =====
@@ -198,14 +204,33 @@
   function log(t){ const p=document.createElement('div'); p.textContent=t; logEl.appendChild(p); logEl.scrollTop=logEl.scrollHeight; }
   function neighbors4(a){ const {c,r}=fromAlg(a); const outs=[]; [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dc,dr])=>{ const nc=c+dc, nr=r+dr; if(nc>=0&&nc<GRID&&nr>=0&&nr<GRID){ const x=toAlg(nc,nr); if(!forbidden.has(x)) outs.push(x); }}); return outs; }
   function isAdjacent4(a,b){ return neighbors4(a).includes(b); }
-  function isLOS(a,b){ const A=fromAlg(a), B=fromAlg(b); const dc=Math.sign(B.c-A.c), dr=Math.sign(B.r-A.r);
-    if(!(A.c===B.c || A.r===B.r || Math.abs(B.c-A.c)===Math.abs(B.r-A.r))) return false;
-    let c=A.c+dc, r=A.r+dr; while(!(c===B.c && r===B.r)){ const x=toAlg(c,r); if(state.blocks.has(x)) return false; if(getPieceAt(x)) return false; c+=dc; r+=dr; } return true; }
-  function getPieceAt(c){ for(const color of ['blue','red']){ const u=state.pieces[color].pieces.find(p=>p.cell===c); if(u) return {color,unit:u}; } return null; }
+  function isLine(a,b){
+    const A=fromAlg(a), B=fromAlg(b); const dc=Math.sign(B.c-A.c), dr=Math.sign(B.r-A.r);
+    if(!(A.c===B.c || A.r===B.r || Math.abs(B.c-A.c)===Math.abs(B.r-A.r))) return null;
+    const seq=[]; let c=A.c+dc, r=A.r+dr; while(!(c===B.c && r===B.r)){ seq.push(toAlg(c,r)); c+=dc; r+=dr; } return seq;
+  }
+  function isFortCell(cell){ return cell===FORT_BLUE || cell===FORT_RED; }
+  function isLOS(a,b){ const between=isLine(a,b); if(!between) return false;
+    return between.every(c=>!state.blocks.has(c) && !getPieceAt(c) && !isFortCell(c));
+  }
+  function getPieceAt(cell){
+    // Exclude fort positions; forts are handled separately
+    if(isFortCell(cell)) return null;
+    for(const color of ['blue','red']){
+      const u=state.pieces[color].pieces.find(p=>p.cell===cell);
+      if(u) return {color,unit:u};
+    }
+    return null;
+  }
   function findUnit(color,id){ return state.pieces[color].pieces.find(u=>u.id===id); }
-  function canStep(from,to){ if(!from||from===to) return false; if(!valid.has(to)||state.blocks.has(to)||getPieceAt(to)) return false; return isAdjacent4(from,to); }
+  function canStep(from,to){
+    if(!from||from===to) return false;
+    if(isFortCell(to)) return false;
+    if(!valid.has(to)||state.blocks.has(to)||getPieceAt(to)) return false;
+    return isAdjacent4(from,to);
+  }
 
-  // ===== Build board =====
+  // ===== Board build =====
   function buildGrid(){
     board.innerHTML='';
     for(let r=GRID-1;r>=0;r--){
@@ -216,39 +241,50 @@
         if(RED_SPAWN.has(alg)) cell.classList.add('rzone');
         if(BLUE_SPAWN.has(alg)) cell.classList.add('bzone');
         const q=document.createElement('div'); q.className='coord'; q.textContent=alg; cell.appendChild(q);
-        cell.addEventListener('click', ()=>onCellClick(alg, cell));
+        cell.addEventListener('click', () => onCellClick(alg, cell));
         board.appendChild(cell);
       }
     }
   }
 
-  function renderPiecesAndForts(){
-    // clear pieces/forts inside cells then re-render
+  function renderBoard(){
+    // Clear and re-render pieces, forts, blocks
     document.querySelectorAll('.cell').forEach(cell=>{
+      // remove non-coord children
       [...cell.children].forEach(ch=>{ if(!ch.classList.contains('coord')) ch.remove(); });
+      // update block state visually
       cell.classList.toggle('blocked', state.blocks.has(cell.dataset.coord));
-      cell.classList.remove('move-ok','move-bad','target-ok','hl');
     });
-    // forts
-    for(const [coord, cls, hp] of [[FORT_BLUE,'blue',state.pieces.blue.fortHP],[FORT_RED,'red',state.pieces.red.fortHP]]){
-      const cell=document.querySelector(`.cell[data-coord="${coord}"]`); if(!cell) continue;
-      const f=document.createElement('div'); f.className=`fort ${cls}`; f.textContent='F';
-      const h=document.createElement('div'); h.className='hp'; h.textContent=`${hp} PV`;
-      cell.appendChild(f); cell.appendChild(h);
-    }
-    // pieces
-    for(const color of ['blue','red']){
+    // Forts
+    const fortPositions=[[FORT_BLUE,'blue',state.pieces.blue.fortHP],[FORT_RED,'red',state.pieces.red.fortHP]];
+    fortPositions.forEach(([pos,color,hp])=>{
+      const cell=document.querySelector(`.cell[data-coord="${pos}"]`);
+      if(cell){ const f=document.createElement('div'); f.className=`fort ${color}`; f.textContent='F';
+        const h=document.createElement('div'); h.className='hp'; h.textContent=`${hp} PV`;
+        cell.appendChild(f); cell.appendChild(h);
+      }
+    });
+    // Blocks
+    state.blocks.forEach(pos=>{
+      const cell=document.querySelector(`.cell[data-coord="${pos}"]`);
+      if(cell){ const b=document.createElement('div'); b.className='block'; cell.appendChild(b); }
+    });
+    // Pieces
+    ['blue','red'].forEach(color=>{
       state.pieces[color].pieces.forEach(u=>{
         if(!u.cell) return;
-        const cell=document.querySelector(`.cell[data-coord="${u.cell}"]`); if(!cell) return;
-        const p=document.createElement('div'); p.className=`piece ${color}`; p.textContent=u.hp;
-        p.title = `${color} ${u.id}`;
-        cell.appendChild(p);
+        const cell=document.querySelector(`.cell[data-coord="${u.cell}"]`);
+        if(cell){ const p=document.createElement('div'); p.className=`piece ${color}`; p.textContent=u.hp;
+          p.title=`${color} ${u.id}`;
+          cell.appendChild(p);
+        }
       });
-    }
+    });
+    // Apply highlights for move/free move
+    applyHighlights();
   }
 
-  // ===== Decks =====
+  // ===== Decks & hands =====
   function buildDeck26(){
     const deck=[];
     deck.push(...Array(3).fill({t:'MOVE',n:2}));
@@ -262,36 +298,32 @@
     return deck.map((c,i)=>({...c,id:`C${Math.random().toString(36).slice(2,8)}${i}`}));
   }
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [a[i],a[j]]=[a[j],a[i]]; } return a; }
-  function reshuffleIfNeeded(P){ if(P.deck.length===0 && P.discard.length){ P.deck = shuffle(P.discard.splice(0)); log('🔄 Re-mélange de la défausse dans la pioche.'); } }
+  function reshuffleIfNeeded(P){ if(P.deck.length===0 && P.discard.length){ P.deck=shuffle(P.discard.splice(0)); log('🔄 Re-mélange de la défausse dans la pioche.'); } }
   function draw(color,n){ const P=state.pieces[color]; while(n-->0){ if(P.deck.length===0) reshuffleIfNeeded(P); if(P.deck.length===0) break; P.hand.push(P.deck.pop()); } updateDeckUI(); }
   function drawTo(color,cap){ const P=state.pieces[color]; while(P.hand.length<cap){ if(P.deck.length===0) reshuffleIfNeeded(P); if(P.deck.length===0) break; P.hand.push(P.deck.pop()); } updateDeckUI(); }
-
   function updateDeckUI(){
     $('#deckB').textContent=state.pieces.blue.deck.length;
     $('#deckR').textContent=state.pieces.red.deck.length;
     $('#discB').textContent=state.pieces.blue.discard.length;
     $('#discR').textContent=state.pieces.red.discard.length;
   }
-
-  // ===== Hands UI =====
-  function pretty(c){
-    switch(c.t){ case 'MOVE': return `Déplacement ${c.n}`;
-      case 'MELEE_SWAP': return 'CAC / Échange';
-      case 'RANGE_TP': return 'Attaque à distance / Téléportation';
-      case 'HEAL_REINFORCE': return 'Soin / Renfort';
-      case 'BLOCK_UNBLOCK': return 'Blocage / Déblocage';
-    } return 'Carte';
-  }
   function renderHands(){
     function side(color,target){
       const P=state.pieces[color]; target.innerHTML='';
       P.hand.forEach((card,idx)=>{
         const box=document.createElement('div'); box.className='cardui';
-        const h=document.createElement('h4'); h.textContent=pretty(card); box.appendChild(h);
+        const h=document.createElement('h4');
+        switch(card.t){ case 'MOVE': h.textContent=`Déplacement ${card.n}`; break;
+          case 'MELEE_SWAP': h.textContent='CAC / Échange'; break;
+          case 'RANGE_TP': h.textContent='Attaque à distance / Téléportation'; break;
+          case 'HEAL_REINFORCE': h.textContent='Soin / Renfort'; break;
+          case 'BLOCK_UNBLOCK': h.textContent='Blocage / Déblocage'; break;
+          default: h.textContent='Carte'; }
+        box.appendChild(h);
         const s=document.createElement('div'); s.className='small'; s.textContent='#'+card.id; box.appendChild(s);
         const b=document.createElement('button'); b.className='btn playbtn'; b.textContent='Jouer';
         if(state.active!==color) b.disabled=true;
-        b.addEventListener('click', ()=>playCard(color, idx));
+        b.addEventListener('click', ()=> playCard(color, idx));
         box.appendChild(b);
         target.appendChild(box);
       });
@@ -299,139 +331,326 @@
     side('blue', $('#handBlue')); side('red', $('#handRed'));
   }
 
-  // ===== Init =====
+  // ===== Highlights =====
+  function clearHighlights(){ document.querySelectorAll('.cell').forEach(cell=>{
+    cell.classList.remove('move-ok','move-bad','hl','target-ok'); }); }
+  function applyHighlights(){
+    clearHighlights();
+    // highlight selected unit
+    if(state.selected){ const cell=document.querySelector(`.cell[data-coord="${state.selected.cell}"]`); if(cell) cell.classList.add('hl'); }
+    // highlight move card path if in progress
+    if(state.inProgress && state.inProgress.mode==='MOVE'){
+      const {color, unitId} = state.inProgress;
+      const unit=findUnit(color, unitId);
+      if(unit && unit.cell){
+        neighbors4(unit.cell).forEach(coord=>{
+          const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
+          if(!cell) return;
+          if(canStep(unit.cell,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
+        });
+        const here=document.querySelector(`.cell[data-coord="${unit.cell}"]`); if(here) here.classList.add('hl');
+      }
+    } else if(state.selected && state.freeMoveRemaining>0){
+      // free move neighbours
+      const unit=findUnit(state.selected.color, state.selected.id);
+      if(unit && unit.cell){ neighbors4(unit.cell).forEach(coord=>{
+        const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
+        if(!cell) return;
+        if(canStep(unit.cell,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
+      });
+      const here=document.querySelector(`.cell[data-coord="${unit.cell}"]`); if(here) here.classList.add('hl'); }
+    }
+  }
+
+  // ===== Game init =====
   function initGame(){
     Object.assign(state,{
       turn:0, active:'blue', phase:'préparation',
       firstTurnMode:true, firstOrder:null, immunity:{p1:true,p2:true},
-      blocks:new Set(), tiles:{}, selected:null, played:0, flags:{}, freeMoveRemaining:0, turnRevealedTile:false,
-      input:{mode:null}
+      blocks:new Set(), tiles:{}, selected:null, played:0, flags:{}, freeMoveRemaining:0, inProgress:null
     });
-    state.pieces.blue = {fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
-    state.pieces.red  = {fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
-    // 5 pions + 2 réserve
+    state.pieces.blue={fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
+    state.pieces.red ={fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
+    // place pions: 5 in spawn, 2 reserve
     shuffle([...BLUE_SPAWN]).slice(0,5).forEach((cell,i)=>state.pieces.blue.pieces.push({id:`B${i+1}`,cell,hp:2}));
     state.pieces.blue.pieces.push({id:'B6',cell:null,hp:2}); state.pieces.blue.pieces.push({id:'B7',cell:null,hp:2});
     shuffle([...RED_SPAWN]).slice(0,5).forEach((cell,i)=>state.pieces.red.pieces.push({id:`R${i+1}`,cell,hp:2}));
     state.pieces.red.pieces.push({id:'R6',cell:null,hp:2}); state.pieces.red.pieces.push({id:'R7',cell:null,hp:2});
     drawTo('blue',5); drawTo('red',5);
-    buildGrid(); renderPiecesAndForts(); renderHands(); renderTop();
+    buildGrid(); renderBoard(); renderHands(); renderTop();
     log('Nouvelle partie. Place 47 tuiles puis tire le premier joueur.');
   }
 
-  // ===== Tiles (squelette) =====
+  // ===== Tiles =====
   function place47(){
-    // simple placeholder count for UI (on implémentera/branchera les effets ensuite si besoin pour le bug MOVE)
-    const all=[...valid].filter(c=>!RED_SPAWN.has(c) && !BLUE_SPAWN.has(c) && c!==FORT_BLUE && c!==FORT_RED);
-    const chosen=shuffle(all).slice(0,47);
-    state.tiles={}; chosen.forEach(c=>state.tiles[c]={key:'ANY',revealed:false});
-    renderTop(); log('47 tuiles placées.');
+    // Place 47 blank tiles on eligible cells (no spawn or forts)
+    const all=[...valid].filter(c=>!RED_SPAWN.has(c)&&!BLUE_SPAWN.has(c)&&c!==FORT_BLUE&&c!==FORT_RED);
+    const spots=shuffle(all).slice(0,47);
+    state.tiles={}; spots.forEach(cell=>{ state.tiles[cell]={key:'BLANK',kind:'blank',revealed:false}; });
+    updateTilesUI(); log('47 tuiles placées.');
   }
+  function updateTilesUI(){ $('#tilesCount').textContent=Object.keys(state.tiles).length; }
   function revealTileIfAny(cell,color){
-    if(state.turnRevealedTile) return;
     const t=state.tiles[cell]; if(!t || t.revealed) return;
-    t.revealed=true; state.turnRevealedTile=true;
-    log(`[Tuile] Révélée sur ${cell} (effet non détaillé dans ce correctif MOVE).`);
+    t.revealed=true; log(`[Tuile] Révélée sur ${cell} (sans effet pour l'instant)`);
+    updateTilesUI();
   }
 
-  // ===== Selection & clicks =====
-  function onCellClick(alg, cellEl){
-    // sélection si on clique sur un pion de l'actif
-    const occ=getPieceAt(alg);
-    if(occ && occ.color===state.active){
-      state.selected={color:occ.color,id:occ.unit.id};
-      highlightSelection();
-      return;
-    }
-
-    // priorité au mode MOVE_CARD si actif
-    if(state.input.mode==='MOVE_CARD'){
-      const {unitId, color} = state.input;
-      const unit=findUnit(color, unitId);
-      if(!unit || !unit.cell) return;
-      // autoriser uniquement si la case cliquée est marquée move-ok
-      if(!cellEl.classList.contains('move-ok')) return;
-      // exécuter un pas
-      unit.cell = alg;
-      revealTileIfAny(alg, color);
-      state.input.remaining--;
-      log(`Déplacement carte: ${unit.id} → ${alg} (reste ${state.input.remaining}).`);
-      if(state.input.remaining<=0){
-        // fin de l'action MOVE
-        commitCardMove();
-      }else{
-        // re-calcul des voisins valides
-        highlightMoveTargets(unit.cell);
-      }
-      renderPiecesAndForts();
-      return;
-    }
-
-    // sinon : déplacement gratuit (1 pas) si sélection et crédit > 0
-    if(state.selected && state.freeMoveRemaining>0){
-      const sel=findUnit(state.selected.color, state.selected.id);
-      if(sel && canStep(sel.cell, alg)){
-        sel.cell=alg; state.freeMoveRemaining--; revealTileIfAny(alg, state.active);
-        log(`Pas gratuit: ${sel.id} → ${alg}.`);
-        renderPiecesAndForts();
-      }
-      return;
-    }
-  }
-
-  function clearHighlights(){
-    document.querySelectorAll('.cell').forEach(c=>c.classList.remove('move-ok','move-bad','target-ok','hl'));
-  }
-  function highlightSelection(){
-    clearHighlights();
-    if(!state.selected) return;
-    const sel=findUnit(state.selected.color, state.selected.id);
-    if(!sel || !sel.cell) return;
-    const cell=document.querySelector(`.cell[data-coord="${sel.cell}"]`);
-    if(cell) cell.classList.add('hl');
-  }
-  function highlightMoveTargets(from){
-    clearHighlights();
-    const neigh=neighbors4(from);
-    neigh.forEach(coord=>{
-      const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
-      if(!cell) return;
-      if(canStep(from,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
-    });
-    const here=document.querySelector(`.cell[data-coord="${from}"]`); if(here) here.classList.add('hl');
-  }
-
-  // ===== Cards =====
+  // ===== Card play =====
   function playCard(color, idx){
-    if(state.active!==color){ log('Pas votre tour.'); return; }
-    const card=state.pieces[color].hand[idx];
+    // Not your turn
+    if(state.active!==color){ log('Ce n\'est pas votre tour.'); return; }
+    // If a move is in progress, discard it before playing another card
+    if(state.inProgress){ commitMoveInProgress(); }
+    const P=state.pieces[color]; const card=P.hand[idx];
+    if(!card) return;
     switch(card.t){
-      case 'MOVE': return playMoveCard(color, idx, card.n);
-      default: log('Seule la carte Déplacement est pertinente pour ce correctif.'); break;
+      case 'MOVE': playMoveCard(color, idx, card.n); break;
+      case 'MELEE_SWAP': playMeleeOrSwap(color, idx); break;
+      case 'RANGE_TP': playRangeOrTP(color, idx); break;
+      case 'HEAL_REINFORCE': playHealOrReinforce(color, idx); break;
+      case 'BLOCK_UNBLOCK': playBlockOrUnblock(color, idx); break;
+      default: log('Carte non reconnue.');
     }
   }
 
-  function playMoveCard(color, handIdx, steps){
-    if(!state.selected){ log('Sélectionnez d\'abord un pion.'); return; }
-    const unit=findUnit(state.selected.color, state.selected.id);
-    if(!unit||!unit.cell){ log('Pion hors plateau.'); return; }
-    state.input={mode:'MOVE_CARD', remaining:steps, color, handIdx, unitId:unit.id};
-    highlightMoveTargets(unit.cell);
-    log(`Carte Déplacement ${steps}: cliquez case par case parmi les surbrillances vertes.`);
+  // ===== MOVE =====
+  function playMoveCard(color, idx, steps){
+    if(!state.selected || state.selected.color!==color){ log('Sélectionnez un de vos pions pour jouer cette carte.'); return; }
+    const unit=findUnit(color, state.selected.id);
+    if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+    const P=state.pieces[color]; const cardObj=P.hand[idx]; const cardId=cardObj.id;
+    state.inProgress={mode:'MOVE', color, unitId:unit.id, cardId, remaining:steps};
+    applyHighlights();
+    log(`Carte Déplacement ${steps}: cliquez les cases vertes pour chaque pas.`);
   }
-
-  function commitCardMove(){
-    const {color, handIdx} = state.input;
-    const P=state.pieces[color];
-    const [c]=P.hand.splice(handIdx,1);
-    if(c) P.discard.push(c);
+  function commitMoveInProgress(){
+    if(!state.inProgress || state.inProgress.mode!=='MOVE') return;
+    const {color, cardId}=state.inProgress;
+    const P=state.pieces[color]; const idx=P.hand.findIndex(c=>c.id===cardId);
+    if(idx>=0){ const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); }
     state.played++;
-    state.input={mode:null};
-    clearHighlights();
-    renderHands(); updateDeckUI();
+    state.inProgress=null;
+    applyHighlights(); renderHands(); updateDeckUI();
   }
 
-  // ===== UI Top =====
+  // ===== MELEE / ECH =====
+  function playMeleeOrSwap(color, idx){
+    if(!state.selected || state.selected.color!==color){ log('Sélectionnez un de vos pions pour jouer cette carte.'); return; }
+    const choice=prompt('Entrez "CAC" pour attaque corps-à-corps ou "ECH" pour échange:','CAC'); if(!choice) return;
+    if(choice.toUpperCase()==='CAC'){ doMelee(color, idx); } else { doSwap(color, idx); }
+  }
+  function doMelee(color, idx){
+    const unit=findUnit(color, state.selected.id);
+    if(!unit||!unit.cell){ log('Pion hors plateau.'); return; }
+    const target=prompt('Cible adjacente (coordonnée) :',''); if(!target) return;
+    const alg=target.toUpperCase();
+    // allow targeting fort
+    if(!valid.has(alg) && alg!==FORT_BLUE && alg!==FORT_RED){ log('Cible invalide.'); return; }
+    if(!isAdjacent4(unit.cell, alg)){ log('Cible non adjacente.'); return; }
+    // attack fort or unit
+    if(alg===FORT_BLUE || alg===FORT_RED){
+      const fortColor=(alg===FORT_BLUE?'blue':'red');
+      if(fortColor===color){ log('Impossible d\'attaquer sa propre forteresse.'); return; }
+      rollDamageFort(fortColor);
+    } else {
+      const occ=getPieceAt(alg);
+      if(!occ || occ.color===color){ log('Pas d\'ennemi à cette case.'); return; }
+      rollDamage(occ.unit, occ.color);
+    }
+    if(state.flags.pressure){ promptDiscard(color==='blue'?'red':'blue',1); state.flags.pressure=false; }
+    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+  function doSwap(color, idx){
+    if(state.flags.noMagic){ log('Anti-magie: Échange impossible.'); return; }
+    const unit=findUnit(color, state.selected.id);
+    if(!unit||!unit.cell){ log('Pion hors plateau.'); return; }
+    const target=prompt('Cible pour échange (coordonnée):',''); if(!target) return;
+    const alg=target.toUpperCase();
+    if(!valid.has(alg) && alg!==FORT_BLUE && alg!==FORT_RED){ log('Cible invalide.'); return; }
+    // cannot swap with fort
+    if(alg===FORT_BLUE || alg===FORT_RED){ log('Impossible d\'échanger avec une forteresse.'); return; }
+    const occ=getPieceAt(alg);
+    if(!occ){ log('Aucun pion sur cette case.'); return; }
+    if(!isLOS(unit.cell, occ.unit.cell)){ log('Pas de ligne de vue.'); return; }
+    if(occ.color!==color){
+      // cannot swap with enemy in their spawn zone
+      if((occ.color==='red' && RED_SPAWN.has(occ.unit.cell)) || (occ.color==='blue' && BLUE_SPAWN.has(occ.unit.cell))){ log('Interdit: ennemi dans sa zone de départ.'); return; }
+    }
+    // swap positions
+    const tmp=unit.cell; unit.cell=occ.unit.cell; occ.unit.cell=tmp;
+    revealTileIfAny(unit.cell,color); revealTileIfAny(occ.unit.cell,occ.color);
+    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
+  // ===== RANGE / TP =====
+  function playRangeOrTP(color, idx){
+    if(!state.selected || state.selected.color!==color){ log('Sélectionnez un de vos pions.'); return; }
+    const choice=prompt('Entrez "DIST" pour attaque à distance ou "TP" pour téléportation:','DIST'); if(!choice) return;
+    if(choice.toUpperCase()==='DIST'){ doRanged(color, idx); } else { doTeleport(color, idx); }
+  }
+  function doRanged(color, idx){
+    if(state.flags.disarmed){ log('Désarmé: pas d\'attaque.'); return; }
+    const unit=findUnit(color, state.selected.id);
+    if(!unit||!unit.cell){ log('Pion hors plateau.'); return; }
+    const target=prompt('Cible (coordonnée, forteresse ou pion ennemi) :',''); if(!target) return;
+    const alg=target.toUpperCase();
+    if(alg!==FORT_BLUE && alg!==FORT_RED && !valid.has(alg)){ log('Cible invalide.'); return; }
+    // cannot target adjacent cells
+    if(isAdjacent4(unit.cell, alg)){ log('Cible adjacente: utilisez CAC.'); return; }
+    const A=fromAlg(unit.cell);
+    const B=fromAlg(alg===FORT_BLUE?FORT_BLUE: alg===FORT_RED?FORT_RED: alg);
+    const dx=Math.abs(A.c-B.c), dy=Math.abs(A.r-B.r);
+    const ortho=(dx===0||dy===0) && (dx+dy>=2 && dx+dy<=4);
+    const diag=(dx===dy) && (dx>=1 && dx<=2);
+    if(!(ortho||diag)){ log('Portée invalide (2-4 ortho ou 1-2 diag).'); return; }
+    if(!isLOS(unit.cell, alg)){ log('Pas de ligne de vue.'); return; }
+    // attack fort or unit
+    if(alg===FORT_BLUE || alg===FORT_RED){
+      const fortColor=(alg===FORT_BLUE?'blue':'red');
+      if(fortColor===color){ log('Impossible de viser sa propre forteresse.'); return; }
+      rollDamageFort(fortColor);
+    } else {
+      const occ=getPieceAt(alg);
+      if(!occ || occ.color===color){ log('Pas d\'ennemi à cette case.'); return; }
+      rollDamage(occ.unit, occ.color);
+    }
+    if(state.flags.pressure){ promptDiscard(color==='blue'?'red':'blue',1); state.flags.pressure=false; }
+    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+  function doTeleport(color, idx){
+    if(state.flags.noMagic){ log('Anti-magie: pas de téléportation.'); return; }
+    const unit=findUnit(color, state.selected.id);
+    if(!unit||!unit.cell){ log('Pion hors plateau.'); return; }
+    const target=prompt('Destination (coordonnée) :',''); if(!target) return;
+    const alg=target.toUpperCase();
+    if(!valid.has(alg)){ log('Destination invalide.'); return; }
+    if(getPieceAt(alg) || state.blocks.has(alg) || isFortCell(alg)){ log('Case occupée, bloquée ou forteresse.'); return; }
+    if(!isLOS(unit.cell, alg)){ log('Pas de ligne de vue.'); return; }
+    if(color==='blue' && RED_SPAWN.has(alg)){ log('Interdit: zone rouge.'); return; }
+    if(color==='red'  && BLUE_SPAWN.has(alg)){ log('Interdit: zone bleue.'); return; }
+    unit.cell=alg;
+    revealTileIfAny(alg,color);
+    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
+  // ===== HEAL / REINFORCE =====
+  function playHealOrReinforce(color, idx){
+    const choice=prompt('"SOIN" pour +2 PV forteresse (max 10) ou "RENF" pour renfort:','SOIN'); if(!choice) return;
+    if(choice.toUpperCase()==='SOIN'){ const P=state.pieces[color]; P.fortHP=Math.min(10,P.fortHP+2); log('Forteresse '+color+' soignée (+2).'); }
+    else {
+      const P=state.pieces[color]; const reserve=P.pieces.find(u=>u.cell===null);
+      if(!reserve){ log('Pas de pion en réserve.'); return; }
+      const zone=color==='blue'? [...BLUE_SPAWN]:[...RED_SPAWN];
+      const spot=zone.find(c=>!getPieceAt(c)); if(!spot){ log('Zone de départ pleine.'); return; }
+      const onBoard=P.pieces.filter(u=>u.cell).length; if(onBoard>=7){ log('Trop de pions sur le plateau.'); return; }
+      reserve.cell=spot; log(`Renfort: ${reserve.id} placé en ${spot}.`);
+    }
+    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
+  // ===== BLOCK / UNBLOCK =====
+  function playBlockOrUnblock(color, idx){
+    const choice=prompt('"BLOC" pour placer un bloc, "DEBLOC" pour retirer:','BLOC'); if(!choice) return;
+    if(choice.toUpperCase()==='BLOC'){
+      if(state.blocks.size>=6){ log('Maximum de blocs actifs.'); return; }
+      if(!state.selected || state.selected.color!==color){ log('Sélectionnez un pion pour placer un bloc.'); return; }
+      const unit=findUnit(color,state.selected.id);
+      if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+      // choose an adjacent candidate that is free, not spawn/orange/fort
+      const cand=neighbors4(unit.cell).find(c=> !state.blocks.has(c) && !getPieceAt(c) && !RED_SPAWN.has(c) && !BLUE_SPAWN.has(c) && !ORANGE.has(c) && !isFortCell(c));
+      if(!cand){ log('Aucune case valide pour placer un bloc.'); return; }
+      state.blocks.add(cand);
+      log(`Bloc placé en ${cand}.`);
+    } else {
+      if(!state.selected || state.selected.color!==color){ log('Sélectionnez un pion pour retirer un bloc.'); return; }
+      const unit=findUnit(color,state.selected.id);
+      if(!unit||!unit.cell){ log('Pion hors plateau.'); return; }
+      const cand=neighbors4(unit.cell).find(c=>state.blocks.has(c));
+      if(!cand){ log('Aucun bloc adjacent à retirer.'); return; }
+      state.blocks.delete(cand);
+      log(`Bloc retiré de ${cand}.`);
+    }
+    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
+  // ===== Combat & dégâts =====
+  function rollDamage(targetUnit, targetColor){
+    const roll=((Math.random()*6)|0)+1; let dmg=(roll===1||roll===6)?2:1;
+    if(state.flags.weakenCrit && (roll===1||roll===6)) dmg=1;
+    targetUnit.hp-=dmg;
+    log(`Jet ${roll} → ${dmg} dégât(s) sur ${targetColor} ${targetUnit.id}.`);
+    if(targetUnit.hp<=0){ removeUnit(targetColor, targetUnit.id); }
+    state.flags.weakenCrit=false;
+    renderBoard();
+  }
+  function rollDamageFort(color){
+    const roll=((Math.random()*6)|0)+1; let dmg=(roll===1||roll===6)?2:1;
+    if(state.flags.weakenCrit && (roll===1||roll===6)) dmg=1;
+    state.pieces[color].fortHP=Math.max(0, state.pieces[color].fortHP-dmg);
+    log(`Jet ${roll} → ${dmg} dégât(s) sur forteresse ${color}.`);
+    state.flags.weakenCrit=false;
+    renderBoard();
+  }
+  function removeUnit(color,id){ const P=state.pieces[color]; const idx=P.pieces.findIndex(u=>u.id===id); if(idx>-1){ P.pieces[idx].cell=null; P.pieces[idx].hp=2; log(`${color} ${id} retiré du plateau.`); } }
+  function promptDiscard(color,n){ const P=state.pieces[color]; while(n-->0 && P.hand.length){ P.discard.push(P.hand.pop()); } updateDeckUI(); renderHands(); }
+
+  // ===== Click handling =====
+  function onCellClick(alg, cellEl){
+    // If a move card is in progress
+    if(state.inProgress && state.inProgress.mode==='MOVE'){
+      const info=state.inProgress; const unit=findUnit(info.color, info.unitId);
+      if(!unit || !unit.cell) return;
+      // only accept valid green cells
+      if(!cellEl.classList.contains('move-ok')) return;
+      const from=unit.cell; unit.cell=alg;
+      // update selection cell for highlight
+      if(state.selected && state.selected.color===info.color && state.selected.id===unit.id){ state.selected.cell=alg; }
+      revealTileIfAny(alg, info.color);
+      info.remaining--;
+      log(`Déplacement carte: ${from} → ${alg} (reste ${info.remaining}).`);
+      if(info.remaining<=0){ commitMoveInProgress(); }
+      renderBoard(); return;
+    }
+    // else selection
+    const occ=getPieceAt(alg);
+    if(occ && occ.color===state.active){ state.selected={color:occ.color,id:occ.unit.id, cell:occ.unit.cell}; applyHighlights(); return; }
+    // free move
+    if(state.selected && state.freeMoveRemaining>0){ const unit=findUnit(state.selected.color, state.selected.id);
+      if(unit && canStep(unit.cell, alg)){
+        unit.cell=alg; state.selected.cell=alg; state.freeMoveRemaining--;
+        revealTileIfAny(alg,state.active);
+        log(`Pas gratuit: ${unit.id} → ${alg}.`);
+        renderBoard(); return;
+      }
+    }
+  }
+
+  // ===== End turn =====
+  function endTurn(){
+    const me=state.active; const opp=(me==='blue'?'red':'blue');
+    const meCount=state.pieces[me].pieces.filter(u=>u.cell && ORANGE.has(u.cell)).length;
+    const oppCount=state.pieces[opp].pieces.filter(u=>u.cell && ORANGE.has(u.cell)).length;
+    let delta=0; if(meCount>=3) delta=2; else if(meCount>=2 && oppCount<=1) delta=1;
+    if(delta>0){ state.pieces[opp].fortHP=Math.max(0,state.pieces[opp].fortHP-delta); log(`Zone orange: forteresse ${opp} -${delta} PV.`); }
+    // draw
+    if(state.flags.drawTo4){ drawTo(me,4); state.flags.drawTo4=false; } else { drawTo(me,5); }
+    state.played=0; state.flags={}; state.freeMoveRemaining=1; state.inProgress=null; state.selected=null;
+    if(state.firstTurnMode){
+      if(state.active===state.firstOrder){ state.immunity.p1=false; state.active=(state.firstOrder==='blue'?'red':'blue'); }
+      else { state.immunity.p2=false; state.firstTurnMode=false; state.turn=1; state.active=state.firstOrder; }
+    } else { state.active=(state.active==='blue'?'red':'blue'); state.turn++; }
+    state.phase='actions';
+    renderTop(); renderBoard(); renderHands();
+  }
+
+  // ===== UI top =====
   function renderTop(){
     $('#turnLabel').textContent=state.turn;
     $('#activePlayer').textContent=(state.active==='blue'?'🔵 Bleu':'🔴 Rouge');
@@ -440,30 +659,24 @@
     $('#redHP').textContent=state.pieces.red.fortHP;
     $('#im1').textContent=state.immunity.p1?'✔':'—';
     $('#im2').textContent=state.immunity.p2?'✔':'—';
-    $('#tilesCount').textContent=Object.keys(state.tiles).length;
     $('#blocksActive').textContent=state.blocks.size;
+    updateTilesUI();
   }
 
   // ===== Buttons =====
-  $('#btnPlaceTiles').addEventListener('click', place47);
   $('#btnReset').addEventListener('click', initGame);
-  $('#btnEndTurn').addEventListener('click', ()=>{
-    // simple tour flip + reset flags pour ce correctif
-    state.turn++;
-    state.active=(state.active==='blue'?'red':'blue');
-    state.freeMoveRemaining=1; state.turnRevealedTile=false; state.played=0; state.flags={}; state.input={mode:null};
-    clearHighlights();
-    renderTop(); renderPiecesAndForts(); renderHands();
-  });
+  $('#btnPlaceTiles').addEventListener('click', place47);
+  $('#btnEndTurn').addEventListener('click', endTurn);
   $('#btnStart').addEventListener('click', ()=>{
     const rB=((Math.random()*6)|0)+1, rR=((Math.random()*6)|0)+1;
-    const first = rB===rR ? (Math.random()<.5?'blue':'red') : (rB>rR?'blue':'red');
-    state.firstOrder=first; state.active=first; state.phase='actions'; state.freeMoveRemaining=1;
-    log(`Jet 🔵=${rB}, 🔴=${rR}. ${first==='blue'?'Bleu':'Rouge'} commence.`);
-    renderTop();
+    const first = (rB===rR) ? (Math.random()<.5?'blue':'red') : (rB>rR?'blue':'red');
+    state.firstOrder=first; state.active=first;
+    state.phase='actions'; state.freeMoveRemaining=1;
+    log(`Jet 🔵=${rB}, 🔴=${rR}. ${first==='blue'?'Bleu':'Rouge'} commence. Immunité pour l'adversaire.`);
+    renderTop(); renderHands();
   });
 
-  // Start
+  // ===== Init =====
   initGame();
   </script>
 </body>
