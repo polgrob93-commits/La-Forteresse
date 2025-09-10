@@ -67,15 +67,58 @@
   const highlight = document.getElementById('highlight');
   const logEl = document.getElementById('log');
 
-  // 1) Crée 81 cellules visibles (grille)
-  function buildGrid(){
-    cells.innerHTML = "";
-    for(let i=0;i<GRID*GRID;i++){
+// --- Définition des cases valides / zones spéciales ---
+const validCells = new Set([
+  "A4","A5","A6","A7","A8",
+  "B4","B5","B6","B7","B8","B9",
+  "C3","C4","C5","C6","C7","C8","C9",
+  "D1","D2","D3","D4","D5","D6","D7","D8","D9",
+  "E1","E2","E3","E4","E5","E6","E7","E8","E9",
+  "F1","F2","F3","F4","F5","F6","F7","F8","F9",
+  "G1","G2","G3","G4","G5","G6","G7",
+  "H1","H2","H3","H4","H5","H6",
+  "I2","I3","I4","I5","I6"
+]);
+
+const orangeZone = new Set(["D5","E4","E5","E6","F5"]);
+
+const redFortress = "I1";
+const blueFortress = "A9";
+
+const redStart = new Set(["G1","G2","G3","H1","H2","H3","I2","I3"]);
+const blueStart = new Set(["A8","A7","B9","B8","B7","C9","C8","C7"]);
+ 
+ function buildGrid(){
+  cells.innerHTML = "";
+  for(let r=GRID-1; r>=0; r--){ // haut → bas
+    for(let c=0; c<GRID; c++){
       const d = document.createElement('div');
       d.className = 'cell';
+      const alg = toAlg(c,r);
+
+      if(!validCells.has(alg)){
+        d.style.background = "rgba(200,0,0,0.15)"; // ❌ interdit
+      }
+      if(orangeZone.has(alg)){
+        d.style.background = "rgba(255,140,0,0.3)"; // 🟧 zone orange
+      }
+      if(redStart.has(alg)){
+        d.style.background = "rgba(255,0,0,0.3)"; // 🔴 départ rouge
+      }
+      if(blueStart.has(alg)){
+        d.style.background = "rgba(0,0,255,0.3)"; // 🔵 départ bleu
+      }
+      if(alg === redFortress){
+        d.style.background = "rgba(255,0,0,0.6)"; // forteresse rouge
+      }
+      if(alg === blueFortress){
+        d.style.background = "rgba(0,0,255,0.6)"; // forteresse bleue
+      }
+
       cells.appendChild(d);
     }
   }
+}
 
   // 2) Helpers coordonnées
   function toAlg(c,r){ return COLS[c] + (r+1); } // (0,0)->A1, (8,8)->I9
@@ -117,10 +160,17 @@
   hit.addEventListener('mouseleave', ()=>{
     highlight.style.display = "none";
   });
-  hit.addEventListener('click', (e)=>{
-    const {c,r} = cellFromEvent(e);
-    logEl.textContent = "Clic sur " + toAlg(c,r) + " (col=" + c + ", ligne=" + r + ")";
-  });
+hit.addEventListener('click', (e)=>{
+  const {c,r} = cellFromEvent(e);
+  const alg = toAlg(c,r);
+
+  if(!validCells.has(alg)){
+    logEl.textContent = alg + " ❌ Case interdite";
+    return;
+  }
+
+  logEl.textContent = "✅ Clic sur " + alg;
+});
 
   // 4) Init + ajuster si redimensionnement
   buildGrid();
