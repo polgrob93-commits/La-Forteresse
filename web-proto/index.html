@@ -184,6 +184,10 @@ hit.addEventListener('click', (e)=>{
   const {c,r} = cellFromEvent(e);
   const alg = toAlg(c,r);
 
+  if(forbiddenCells.has(alg)){
+    logEl.textContent = alg + " 🚫 Case inexistante";
+    return;
+  }
   if(!validCells.has(alg)){
     logEl.textContent = alg + " ❌ Case interdite";
     return;
