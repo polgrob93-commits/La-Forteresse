@@ -161,16 +161,24 @@ function buildGrid(){
     return { c, r, cell, rect };
   }
 
-  function placeHighlight(c,r, cell){
-    // convertir r (0=bas) en coord écran (0=haut)
-    const yTop = (GRID-1 - r) * cell;
-    const x = c * cell;
-    highlight.style.left = x + "px";
-    highlight.style.top  = yTop + "px";
-    highlight.style.width  = cell + "px";
-    highlight.style.height = cell + "px";
-    highlight.style.display = "block";
+function placeHighlight(c,r, cell){
+  const alg = toAlg(c,r);
+
+  // 🚫 Pas de highlight si la case est inexistante
+  if(forbiddenCells.has(alg)){
+    highlight.style.display = "none";
+    return;
   }
+
+  // convertir r (0=bas) en coord écran (0=haut)
+  const yTop = (GRID-1 - r) * cell;
+  const x = c * cell;
+  highlight.style.left = x + "px";
+  highlight.style.top  = yTop + "px";
+  highlight.style.width  = cell + "px";
+  highlight.style.height = cell + "px";
+  highlight.style.display = "block";
+}
 
   // 3) Interactions
   hit.addEventListener('mousemove', (e)=>{
@@ -185,9 +193,10 @@ hit.addEventListener('click', (e)=>{
   const alg = toAlg(c,r);
 
   if(forbiddenCells.has(alg)){
-    logEl.textContent = alg + " 🚫 Case inexistante";
+    logEl.textContent = alg + " 🚫 Case inexistante (inutilisable)";
     return;
   }
+
   if(!validCells.has(alg)){
     logEl.textContent = alg + " ❌ Case interdite";
     return;
