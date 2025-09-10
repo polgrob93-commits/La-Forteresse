@@ -939,50 +939,60 @@
   }
 
   // ===== End turn =====
-  function endTurn(){
-    // If we are in the actions phase, switch to preparation: allow discarding up to 2 cards
-    if(state.phase === 'actions'){
-      state.phase = 'préparation';
-      state.discardLeft = 2;
-      // When entering preparation we reset selection and any in-progress actions
-      state.inProgress = null;
-      state.selected = null;
-      state.freeMoveRemaining = 0;
-      // Update UI: change button label via renderTop, and show discard buttons via renderHands
-      renderTop(); renderBoard(); renderHands();
-      log('Phase de préparation : vous pouvez défausser jusqu\'à 2 cartes.');
-      return;
-    }
-    // Otherwise we are in préparation: finalize the turn
-    // Apply zone orange damage for both players (dominant side damages the other)
-    applyZoneDamage();
-    // draw cards for the current player (me)
-    if(state.flags.drawTo4){ drawTo(me,4); state.flags.drawTo4=false; } else { drawTo(me,5); }
-    // Reset per-turn state
-    state.played = 0;
-    state.flags = {};
-    state.freeMoveRemaining = 1;
+function endTurn(){
+  // Si on est en phase d'actions → bascule en préparation (défausse possible)
+  if(state.phase === 'actions'){
+    state.phase = 'préparation';
+    state.discardLeft = 2;
     state.inProgress = null;
     state.selected = null;
-    state.discardLeft = 0;
-    // Advance to next active player, handling first turn mode
-    if(state.firstTurnMode){
-      if(state.active === state.firstOrder){
-        state.immunity.p1 = false;
-        state.active = (state.firstOrder === 'blue' ? 'red' : 'blue');
-      } else {
-        state.immunity.p2 = false;
-        state.firstTurnMode = false;
-        state.turn = 1;
-        state.active = state.firstOrder;
-      }
-    } else {
-      state.active = (state.active === 'blue' ? 'red' : 'blue');
-      state.turn++;
-    }
-    state.phase = 'actions';
+    state.freeMoveRemaining = 0;
     renderTop(); renderBoard(); renderHands();
+    log('Phase de préparation : vous pouvez défausser jusqu\'à 2 cartes.');
+    return;
   }
+
+  // Sinon on est en préparation → finaliser le tour
+  // 1) Dégâts zone orange
+  applyZoneDamage();
+
+  // 2) Piocher pour le joueur courant (avant de changer active)
+  const me = state.active; // <-- clé du fix
+  if(state.flags.drawTo4){
+    drawTo(me, 4);
+    state.flags.drawTo4 = false;
+  } else {
+    drawTo(me, 5);
+  }
+
+  // 3) Reset d'état par tour
+  state.played = 0;
+  state.flags = {};
+  state.freeMoveRemaining = 1;
+  state.inProgress = null;
+  state.selected = null;
+  state.discardLeft = 0;
+
+  // 4) Avancer le tour / gérer l'immunité T1
+  if(state.firstTurnMode){
+    if(state.active === state.firstOrder){
+      state.immunity.p1 = false;
+      state.active = (state.firstOrder === 'blue' ? 'red' : 'blue');
+    } else {
+      state.immunity.p2 = false;
+      state.firstTurnMode = false;
+      state.turn = 1;
+      state.active = state.firstOrder;
+    }
+  } else {
+    state.active = (state.active === 'blue' ? 'red' : 'blue');
+    state.turn++;
+  }
+
+  // 5) Repasser en phase d'actions
+  state.phase = 'actions';
+  renderTop(); renderBoard(); renderHands();
+}
 
   // ===== Fin de partie =====
   function checkGameOver(){
