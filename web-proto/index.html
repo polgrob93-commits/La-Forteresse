@@ -1,20 +1,67 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>La Forteresse - Proto</title>
   <style>
-    body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }
-    #board { 
-      width:90vmin; 
-      height:90vmin; 
-      background:url('plateau.png') center/cover no-repeat; 
-      border:2px solid white; 
+    :root { --grid: 9; }
+    body {
+      margin:0; background:#111; color:#eee;
+      display:flex; justify-content:center; align-items:center; min-height:100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+    .wrap { width:min(92vmin, 900px); }
+    #board {
+      position:relative;
+      width:100%; aspect-ratio:1/1;
+      background:url('plateau.png') center/cover no-repeat;
+      border:2px solid #fff; border-radius:12px; overflow:hidden;
+      box-shadow:0 10px 30px rgba(0,0,0,.4);
+      user-select:none;
+    }
+    /* Grille dessinée par-dessus (non interactive) */
+    #board::after{
+      content:"";
+      position:absolute; inset:0;
+      pointer-events:none;
+      /* lignes verticales + horizontales */
+      background-image:
+        repeating-linear-gradient(
+          to right,
+          rgba(255,255,255,.25) 0px,
+          rgba(255,255,255,.25) 1px,
+          transparent 1px,
+          transparent calc(100% / var(--grid))
+        ),
+        repeating-linear-gradient(
+          to bottom,
+          rgba(255,255,255,.25) 0px,
+          rgba(255,255,255,.25) 1px,
+          transparent 1px,
+          transparent calc(100% / var(--grid))
+        );
+    }
+    /* Couche qui capte les clics */
+    #hit {
+      position:absolute; inset:0; cursor:pointer;
+    }
+    /* surbrillance de la case sous la souris */
+    #highlight {
+      position:absolute; width:0; height:0;
+      outline:2px solid rgba(255,255,255,.7);
+      pointer-events:none; display:none;
+    }
+    .log {
+      margin-top:10px; background:#1a1f2c; border:1px solid #2a3142;
+      padding:10px; border-radius:10px; font-size:14px;
     }
   </style>
 </head>
 <body>
-  <div id="board"></div>
-</body>
-</html>
+  <div class="wrap">
+    <div id="board">
+      <div id="hit" aria-label="zone interactive"></div>
+      <div id="highlight"></div>
+    </div>
+    <div class="log"
