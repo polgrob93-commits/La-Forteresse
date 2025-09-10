@@ -92,34 +92,27 @@ function buildGrid(){
   cells.innerHTML = "";
   for(let r=GRID-1; r>=0; r--){ // haut → bas
     for(let c=0; c<GRID; c++){
-      const alg = toAlg(c,r);
-
-      // ❌ Si la case n'est pas valide ET pas une forteresse → on saute
-      if(!validCells.has(alg) && alg !== redFortress && alg !== blueFortress){
-        continue;
-      }
-
       const d = document.createElement('div');
       d.className = 'cell';
+      const alg = toAlg(c,r);
 
-      // 🟧 zone centrale
+      if(!validCells.has(alg)){
+        d.style.background = "rgba(200,0,0,0.15)"; // ❌ interdit
+      }
       if(orangeZone.has(alg)){
-        d.style.background = "rgba(255,140,0,0.3)";
+        d.style.background = "rgba(255,140,0,0.3)"; // 🟧 zone orange
       }
-      // 🔴 départ rouge
       if(redStart.has(alg)){
-        d.style.background = "rgba(255,0,0,0.3)";
+        d.style.background = "rgba(255,0,0,0.3)"; // 🔴 départ rouge
       }
-      // 🔵 départ bleu
       if(blueStart.has(alg)){
-        d.style.background = "rgba(0,0,255,0.3)";
+        d.style.background = "rgba(0,0,255,0.3)"; // 🔵 départ bleu
       }
-      // 🏰 forteresse
       if(alg === redFortress){
-        d.style.background = "rgba(255,0,0,0.6)";
+        d.style.background = "rgba(255,0,0,0.6)"; // forteresse rouge
       }
       if(alg === blueFortress){
-        d.style.background = "rgba(0,0,255,0.6)";
+        d.style.background = "rgba(0,0,255,0.6)"; // forteresse bleue
       }
 
       cells.appendChild(d);
