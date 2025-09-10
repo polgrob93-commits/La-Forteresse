@@ -3,12 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>La Forteresse — Proto (v0.2)</title>
+  <title>La Forteresse — Proto (v0.2-fix MOVE)</title>
   <style>
     :root{ --grid:9; --bg:#0f1116; --panel:#151a23; --text:#e8eef7; --muted:#8ea0bf;
            --tile:#1b2230; --tile2:#1f2736; --orange:#e6a23c; --blue:#2c7be5; --red:#e55353; }
-    *{box-sizing:border-box}
-    html,body{height:100%}
+    *{box-sizing:border-box} html,body{height:100%}
     body{margin:0;background:linear-gradient(120deg,#0f1116,#0c111a);color:var(--text);
          font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
     .app{max-width:1240px;margin:14px auto;padding:0 12px;display:grid;gap:12px;
@@ -29,9 +28,9 @@
 
     /* Board */
     .board-wrap{display:grid;place-items:center;padding:12px}
-    #board{position:relative;width:96vmin;max-width:680px;aspect-ratio:1/1;background:#0b0f16;border:1px solid #1c2433;border-radius:14px}
-    #cells{position:absolute;inset:8px;display:grid;grid-template-columns:repeat(var(--grid),1fr);grid-template-rows:repeat(var(--grid),1fr);gap:2px}
-    .cell{border-radius:8px;position:relative}
+    #board{display:grid;grid-template-columns:repeat(9,1fr);grid-template-rows:repeat(9,1fr);
+           gap:2px;width:96vmin;max-width:680px;aspect-ratio:1/1;background:#0b0f16;border:1px solid #1c2433;border-radius:14px;padding:8px}
+    .cell{border-radius:8px;position:relative;display:grid;place-items:center;user-select:none}
     .cell.play{background:linear-gradient(180deg,var(--tile),var(--tile2));border:1px solid #24304a}
     .cell.invalid{background:transparent;border:1px dashed #1c2233;opacity:.25}
     .cell.orange{outline:2px solid var(--orange)}
@@ -39,19 +38,18 @@
     .cell.rzone{box-shadow:inset 0 0 0 2px rgba(229,83,83,.35)}
     .cell.blocked::after{content:'';position:absolute;inset:6px;border-radius:6px;background:repeating-linear-gradient(45deg,#3a4356 0 6px,#151b27 6px 12px);opacity:.8;outline:2px solid #3a445a}
     .coord{position:absolute;right:4px;bottom:4px;font-size:10px;color:#8a94ab;opacity:.7}
-    #hit{position:absolute;inset:8px;cursor:pointer}
-    #highlight{position:absolute;border:2px solid rgba(255,255,255,.9);pointer-events:none;display:none;transform:translate(-1px,-1px)}
+    .cell.hl { outline:3px solid #fff; outline-offset:-3px; }
+    .cell.move-ok { box-shadow:inset 0 0 0 3px rgba(111, 255, 145, .9); cursor:pointer; }
+    .cell.move-bad{ box-shadow:inset 0 0 0 3px rgba(255, 111, 111, .7); }
+    .cell.target-ok{ box-shadow:inset 0 0 0 3px rgba(255, 215, 111, .9); cursor:pointer; }
 
-    .fort{position:absolute;display:grid;place-items:center;width:calc((100% - 16px)/9);height:calc((100% - 16px)/9);
-          border-radius:12px;border:2px solid rgba(0,0,0,.35);font-weight:800;color:#0b0f16;box-shadow:0 6px 12px rgba(0,0,0,.35)}
+    .fort, .piece{width:75%;height:75%;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#0b0f16;border:2px solid rgba(0,0,0,.35);box-shadow:0 6px 12px rgba(0,0,0,.35)}
+    .fort{border-radius:12px;width:82%;height:82%;font-weight:800}
     .fort.blue{background:linear-gradient(180deg,#afd3ff,#7ab6ff)}
     .fort.red{background:linear-gradient(180deg,#ffb1b1,#ff7e7e)}
-    .hp{position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);font-size:11px;color:#cfd7ea;background:#121722;border:1px solid #1d2433;border-radius:8px;padding:2px 6px}
-
-    .piece{position:absolute;width:calc((100% - 16px)/9 * .74);height:calc((100% - 16px)/9 * .74);border-radius:50%;
-           display:grid;place-items:center;font-weight:700;color:#0b0f16;border:2px solid rgba(0,0,0,.35);box-shadow:0 6px 12px rgba(0,0,0,.35)}
     .piece.blue{background:linear-gradient(180deg,#3c9cff,#2c7be5)}
     .piece.red{background:linear-gradient(180deg,#ff6767,#e55353)}
+    .hp{position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);font-size:11px;color:#cfd7ea;background:#121722;border:1px solid #1d2433;border-radius:8px;padding:2px 6px}
 
     .hand{display:grid;gap:8px}
     .cardui{background:#141a22;border:1px solid #232a3a;border-radius:12px;padding:10px}
@@ -112,11 +110,7 @@
     <main class="card">
       <h2>Plateau</h2>
       <div class="board-wrap">
-        <div id="board">
-          <div id="cells"></div>
-          <div id="highlight"></div>
-          <div id="hit" title="Clique pour sélectionner/déplacer"></div>
-        </div>
+        <div id="board"></div>
       </div>
     </main>
 
@@ -179,78 +173,82 @@
   const FORT_BLUE="A9", FORT_RED="I1";
 
   const $ = (s)=>document.querySelector(s);
-  const board=$("#board"), cells=$("#cells"), hit=$("#hit"), hl=$("#highlight"), logEl=$("#log");
+  const board=$("#board"), logEl=$("#log");
 
   const state = {
     turn:0, active:'blue', phase:'préparation',
     firstTurnMode:true, firstOrder:null, immunity:{p1:true,p2:true},
     blocks:new Set(),
-    tiles:{}, // cell -> {kind:'positive'|'negative'|'blank', key, revealed:false}
+    tiles:{},
     selected:null, // {color,id}
     played:0,
-    freeMoveRemaining:0, // 1 pas gratuit par tour (+2 si Sprint)
+    freeMoveRemaining:0,
+    turnRevealedTile:false, // une seule tuile révélée par tour
     pieces:{
       blue:{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
       red :{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
     },
-    flags:{} // (accroc, pression…)
+    flags:{},
+    input:{ mode:null } // {mode:'MOVE_CARD', remaining, color, handIdx, unitId}
   };
 
-  // ===== Helpers coord =====
+  // ===== Helpers =====
   function toAlg(c,r){ return COLS[c]+(r+1); }
   function fromAlg(a){ return {c:COLS.indexOf(a[0]), r:+a.slice(1)-1}; }
-  function xyCellSize(){ const rect=board.getBoundingClientRect(); return (rect.width-16)/GRID; }
-  function placeRectFor(alg, el){
-    const {c,r}=fromAlg(alg), sz=xyCellSize();
-    el.style.left = (8 + c*sz)+'px';
-    el.style.top  = (8 + (GRID-1-r)*sz)+'px';
-    el.style.width= sz+'px';
-    el.style.height= sz+'px';
-  }
   function log(t){ const p=document.createElement('div'); p.textContent=t; logEl.appendChild(p); logEl.scrollTop=logEl.scrollHeight; }
+  function neighbors4(a){ const {c,r}=fromAlg(a); const outs=[]; [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dc,dr])=>{ const nc=c+dc, nr=r+dr; if(nc>=0&&nc<GRID&&nr>=0&&nr<GRID){ const x=toAlg(nc,nr); if(!forbidden.has(x)) outs.push(x); }}); return outs; }
+  function isAdjacent4(a,b){ return neighbors4(a).includes(b); }
+  function isLOS(a,b){ const A=fromAlg(a), B=fromAlg(b); const dc=Math.sign(B.c-A.c), dr=Math.sign(B.r-A.r);
+    if(!(A.c===B.c || A.r===B.r || Math.abs(B.c-A.c)===Math.abs(B.r-A.r))) return false;
+    let c=A.c+dc, r=A.r+dr; while(!(c===B.c && r===B.r)){ const x=toAlg(c,r); if(state.blocks.has(x)) return false; if(getPieceAt(x)) return false; c+=dc; r+=dr; } return true; }
+  function getPieceAt(c){ for(const color of ['blue','red']){ const u=state.pieces[color].pieces.find(p=>p.cell===c); if(u) return {color,unit:u}; } return null; }
+  function findUnit(color,id){ return state.pieces[color].pieces.find(u=>u.id===id); }
+  function canStep(from,to){ if(!from||from===to) return false; if(!valid.has(to)||state.blocks.has(to)||getPieceAt(to)) return false; return isAdjacent4(from,to); }
 
-  // ===== Board build =====
+  // ===== Build board =====
   function buildGrid(){
-    cells.innerHTML='';
+    board.innerHTML='';
     for(let r=GRID-1;r>=0;r--){
       for(let c=0;c<GRID;c++){
         const alg=toAlg(c,r);
-        const d=document.createElement('div');
-        d.className='cell '+(forbidden.has(alg)?'invalid':'play');
-        if(ORANGE.has(alg)) d.classList.add('orange');
-        if(RED_SPAWN.has(alg)) d.classList.add('rzone');
-        if(BLUE_SPAWN.has(alg)) d.classList.add('bzone');
-        const q=document.createElement('div'); q.className='coord'; q.textContent=alg; d.appendChild(q);
-        cells.appendChild(d);
+        const cell=document.createElement('div'); cell.className='cell '+(forbidden.has(alg)?'invalid':'play'); cell.dataset.coord=alg;
+        if(ORANGE.has(alg)) cell.classList.add('orange');
+        if(RED_SPAWN.has(alg)) cell.classList.add('rzone');
+        if(BLUE_SPAWN.has(alg)) cell.classList.add('bzone');
+        const q=document.createElement('div'); q.className='coord'; q.textContent=alg; cell.appendChild(q);
+        cell.addEventListener('click', ()=>onCellClick(alg, cell));
+        board.appendChild(cell);
       }
     }
   }
 
-  // ===== Pieces & forts render =====
-  function renderBoardObjects(){
-    // wipe previous pieces/forts
-    [...board.querySelectorAll('.fort,.piece,.hp')].forEach(n=>n.remove());
-
-    // Forts
-    const fB=document.createElement('div'); fB.className='fort blue'; placeRectFor(FORT_BLUE,fB); fB.textContent='F'; board.appendChild(fB);
-    const hB=document.createElement('div'); hB.className='hp'; hB.textContent=state.pieces.blue.fortHP+' PV'; fB.appendChild(hB);
-
-    const fR=document.createElement('div'); fR.className='fort red';  placeRectFor(FORT_RED,fR);  fR.textContent='F'; board.appendChild(fR);
-    const hR=document.createElement('div'); hR.className='hp'; hR.textContent=state.pieces.red.fortHP+' PV'; fR.appendChild(hR);
-
-    // Pieces
+  function renderPiecesAndForts(){
+    // clear pieces/forts inside cells then re-render
+    document.querySelectorAll('.cell').forEach(cell=>{
+      [...cell.children].forEach(ch=>{ if(!ch.classList.contains('coord')) ch.remove(); });
+      cell.classList.toggle('blocked', state.blocks.has(cell.dataset.coord));
+      cell.classList.remove('move-ok','move-bad','target-ok','hl');
+    });
+    // forts
+    for(const [coord, cls, hp] of [[FORT_BLUE,'blue',state.pieces.blue.fortHP],[FORT_RED,'red',state.pieces.red.fortHP]]){
+      const cell=document.querySelector(`.cell[data-coord="${coord}"]`); if(!cell) continue;
+      const f=document.createElement('div'); f.className=`fort ${cls}`; f.textContent='F';
+      const h=document.createElement('div'); h.className='hp'; h.textContent=`${hp} PV`;
+      cell.appendChild(f); cell.appendChild(h);
+    }
+    // pieces
     for(const color of ['blue','red']){
       state.pieces[color].pieces.forEach(u=>{
         if(!u.cell) return;
-        const p=document.createElement('div'); p.className='piece '+(color==='blue'?'blue':'red'); p.textContent=u.hp;
-        placeRectFor(u.cell,p);
-        p.addEventListener('click', (e)=>{ e.stopPropagation(); state.selected={color,id:u.id}; log(`Sélection: ${color} ${u.id} @ ${u.cell}`); });
-        board.appendChild(p);
+        const cell=document.querySelector(`.cell[data-coord="${u.cell}"]`); if(!cell) return;
+        const p=document.createElement('div'); p.className=`piece ${color}`; p.textContent=u.hp;
+        p.title = `${color} ${u.id}`;
+        cell.appendChild(p);
       });
     }
   }
 
-  // ===== Decks (26) =====
+  // ===== Decks =====
   function buildDeck26(){
     const deck=[];
     deck.push(...Array(3).fill({t:'MOVE',n:2}));
@@ -267,6 +265,7 @@
   function reshuffleIfNeeded(P){ if(P.deck.length===0 && P.discard.length){ P.deck = shuffle(P.discard.splice(0)); log('🔄 Re-mélange de la défausse dans la pioche.'); } }
   function draw(color,n){ const P=state.pieces[color]; while(n-->0){ if(P.deck.length===0) reshuffleIfNeeded(P); if(P.deck.length===0) break; P.hand.push(P.deck.pop()); } updateDeckUI(); }
   function drawTo(color,cap){ const P=state.pieces[color]; while(P.hand.length<cap){ if(P.deck.length===0) reshuffleIfNeeded(P); if(P.deck.length===0) break; P.hand.push(P.deck.pop()); } updateDeckUI(); }
+
   function updateDeckUI(){
     $('#deckB').textContent=state.pieces.blue.deck.length;
     $('#deckR').textContent=state.pieces.red.deck.length;
@@ -300,316 +299,139 @@
     side('blue', $('#handBlue')); side('red', $('#handRed'));
   }
 
-  // ===== Init game =====
+  // ===== Init =====
   function initGame(){
     Object.assign(state,{
       turn:0, active:'blue', phase:'préparation',
       firstTurnMode:true, firstOrder:null, immunity:{p1:true,p2:true},
-      blocks:new Set(), tiles:{}, selected:null, played:0, flags:{}, freeMoveRemaining:0
+      blocks:new Set(), tiles:{}, selected:null, played:0, flags:{}, freeMoveRemaining:0, turnRevealedTile:false,
+      input:{mode:null}
     });
-
     state.pieces.blue = {fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
     state.pieces.red  = {fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
-
-    // 5 pions en zone + 2 réserve
+    // 5 pions + 2 réserve
     shuffle([...BLUE_SPAWN]).slice(0,5).forEach((cell,i)=>state.pieces.blue.pieces.push({id:`B${i+1}`,cell,hp:2}));
     state.pieces.blue.pieces.push({id:'B6',cell:null,hp:2}); state.pieces.blue.pieces.push({id:'B7',cell:null,hp:2});
     shuffle([...RED_SPAWN]).slice(0,5).forEach((cell,i)=>state.pieces.red.pieces.push({id:`R${i+1}`,cell,hp:2}));
     state.pieces.red.pieces.push({id:'R6',cell:null,hp:2}); state.pieces.red.pieces.push({id:'R7',cell:null,hp:2});
-
     drawTo('blue',5); drawTo('red',5);
-
-    buildGrid(); renderBoardObjects(); renderHands(); renderTop();
+    buildGrid(); renderPiecesAndForts(); renderHands(); renderTop();
     log('Nouvelle partie. Place 47 tuiles puis tire le premier joueur.');
   }
 
-  // ===== Tiles (47) =====
-  const TILE_POS=[...Array(5).fill({k:'TIR_ANCRE',kind:'positive'}),...Array(4).fill({k:'REFLEXE',kind:'positive'}),
-                  ...Array(6).fill({k:'SPRINT',kind:'positive'}),...Array(4).fill({k:'PRESSION',kind:'positive'}),
-                  ...Array(4).fill({k:'PANSEMENT',kind:'positive'}),...Array(2).fill({k:'MOLETTE',kind:'positive'})];
-  const TILE_NEG=[...Array(3).fill({k:'ACCROC',kind:'negative'}),...Array(2).fill({k:'ANTI_MAGIE',kind:'negative'}),
-                  ...Array(4).fill({k:'MAIN_LOURDE',kind:'negative'}),...Array(3).fill({k:'DESARME',kind:'negative'}),
-                  ...Array(2).fill({k:'FAIBLESSE',kind:'negative'}),...Array(2).fill({k:'REVERSE',kind:'negative'})];
-
-  function tileEligible(){
-    // Pas de tuiles sur zones de départ, ni sur forteresses
-    const all=[]; for(let r=0;r<GRID;r++){ for(let c=0;c<GRID;c++){ const a=toAlg(c,r); if(forbidden.has(a)) continue; all.push(a); } }
-    return all.filter(a=>!RED_SPAWN.has(a)&&!BLUE_SPAWN.has(a)&&a!==FORT_BLUE&&a!==FORT_RED);
-  }
+  // ===== Tiles (squelette) =====
   function place47(){
-    state.tiles={};
-    const spots=shuffle(tileEligible()).slice(0,47);
-    const pool=shuffle([...TILE_POS, ...TILE_NEG, ...Array(47-(TILE_POS.length+TILE_NEG.length)).fill({k:'BLANK',kind:'blank'})]);
-    spots.forEach((cell,i)=>{ state.tiles[cell]={...pool[i],revealed:false}; });
+    // simple placeholder count for UI (on implémentera/branchera les effets ensuite si besoin pour le bug MOVE)
+    const all=[...valid].filter(c=>!RED_SPAWN.has(c) && !BLUE_SPAWN.has(c) && c!==FORT_BLUE && c!==FORT_RED);
+    const chosen=shuffle(all).slice(0,47);
+    state.tiles={}; chosen.forEach(c=>state.tiles[c]={key:'ANY',revealed:false});
     renderTop(); log('47 tuiles placées.');
   }
-  function revealTile(cell,color){
+  function revealTileIfAny(cell,color){
+    if(state.turnRevealedTile) return;
     const t=state.tiles[cell]; if(!t || t.revealed) return;
-    t.revealed=true;
-    switch(t.k){
-      case 'TIR_ANCRE': log(`[Tuile +] Tir ancré @${cell}`); autoRanged(cell,color); break;
-      case 'REFLEXE': log(`[Tuile +] Réflexe (+1 pioche, +1 carte jouable)`); draw(color,1); state.flags.extraCard=(state.flags.extraCard||0)+1; break;
-      case 'SPRINT': log(`[Tuile +] Sprint (+2 cases au déplacement gratuit)`); state.freeMoveRemaining += 2; break;
-      case 'PRESSION': log(`[Tuile +] Pression (prochaine Attaque → adversaire défausse 1)`); state.flags.pressure=true; break;
-      case 'PANSEMENT': healAuto(color); break;
-      case 'MOLETTE': molette(cell); break;
-      case 'ACCROC': state.flags.drawTo4=true; log(`[Tuile -] Accroc (fin de tour → jusqu'à 4 cartes)`); break;
-      case 'ANTI_MAGIE': state.flags.noMagic=true; log(`[Tuile -] Anti-magie (pas de TP/ÉCH ce tour)`); break;
-      case 'MAIN_LOURDE': state.flags.weakenCrit=true; log(`[Tuile -] Main lourde (1/6 → 1 dégât)`); break;
-      case 'DESARME': state.flags.disarmed=true; log(`[Tuile -] Désarmé (aucune attaque ce tour)`); break;
-      case 'FAIBLESSE': damageSelf(cell,1); break;
-      case 'REVERSE': damageSelf(cell,1); log(`[Tuile -] Reverse (simplifié: -1 PV)`); break;
-      default: log(`[Tuile ○] Sans effet`);
-    }
-    renderBoardObjects();
-  }
-  function piecesOf(color){ return state.pieces[color].pieces.filter(u=>u.cell); }
-  function autoRanged(from,color){
-    const foes = piecesOf(color==='blue'?'red':'blue').map(u=>u.cell).filter(c=>isRangedValid(from,c));
-    if(foes.length) doRanged(from,foes[0],color,true); else { draw(color,1); promptDiscard(color,1); }
-  }
-  function healAuto(color){
-    const P=state.pieces[color]; const hurt = piecesOf(color).find(u=>u.hp<2);
-    if(hurt){ hurt.hp=Math.min(2,hurt.hp+1); log(`[Tuile +] Pansement: ${color} ${hurt.id} +1 PV`);} 
-    else { P.fortHP=Math.min(10,P.fortHP+1); log(`[Tuile +] Pansement: Forteresse ${color} +1 PV`);}  }
-  function molette(cell){
-    if(state.blocks.size<6){
-      const cands = neighbors4(cell).find(c=>!state.blocks.has(c) && !getPieceAt(c) && !RED_SPAWN.has(c) && !BLUE_SPAWN.has(c) && !ORANGE.has(c));
-      if(cands){ state.blocks.add(cands); log(`[Tuile +] Molette: bloc placé ${cands}`); }
-    } else {
-      const any=[...state.blocks][0]; state.blocks.delete(any); log(`[Tuile +] Molette: bloc retiré ${any}`);
-    }
-  }
-  function damageSelf(cell,n){
-    const hit = getPieceAt(cell);
-    if(hit){ hit.unit.hp-=n; if(hit.unit.hp<=0){ removeUnit(hit.color, hit.unit.id); } }
+    t.revealed=true; state.turnRevealedTile=true;
+    log(`[Tuile] Révélée sur ${cell} (effet non détaillé dans ce correctif MOVE).`);
   }
 
-  // ===== Selection & hit layer =====
-  hit.addEventListener('mousemove',(e)=>{ const {c,r,cell}=cellFromEvent(e); placeHL(c,r,cell); });
-  hit.addEventListener('mouseleave',()=>{ hl.style.display='none'; });
-  hit.addEventListener('click',(e)=>{
-    const {c,r}=cellFromEvent(e); const alg=toAlg(c,r);
-    if(forbidden.has(alg) || !valid.has(alg)) return;
-    // si clic sur son pion → sélection
+  // ===== Selection & clicks =====
+  function onCellClick(alg, cellEl){
+    // sélection si on clique sur un pion de l'actif
     const occ=getPieceAt(alg);
-    if(occ && occ.color===state.active){ state.selected={color:occ.color,id:occ.unit.id}; log(`Sélection: ${occ.color} ${occ.unit.id} @ ${alg}`); return; }
-    // sinon tentative de pas gratuit (1 case)
+    if(occ && occ.color===state.active){
+      state.selected={color:occ.color,id:occ.unit.id};
+      highlightSelection();
+      return;
+    }
+
+    // priorité au mode MOVE_CARD si actif
+    if(state.input.mode==='MOVE_CARD'){
+      const {unitId, color} = state.input;
+      const unit=findUnit(color, unitId);
+      if(!unit || !unit.cell) return;
+      // autoriser uniquement si la case cliquée est marquée move-ok
+      if(!cellEl.classList.contains('move-ok')) return;
+      // exécuter un pas
+      unit.cell = alg;
+      revealTileIfAny(alg, color);
+      state.input.remaining--;
+      log(`Déplacement carte: ${unit.id} → ${alg} (reste ${state.input.remaining}).`);
+      if(state.input.remaining<=0){
+        // fin de l'action MOVE
+        commitCardMove();
+      }else{
+        // re-calcul des voisins valides
+        highlightMoveTargets(unit.cell);
+      }
+      renderPiecesAndForts();
+      return;
+    }
+
+    // sinon : déplacement gratuit (1 pas) si sélection et crédit > 0
     if(state.selected && state.freeMoveRemaining>0){
       const sel=findUnit(state.selected.color, state.selected.id);
-      if(sel && canStep(sel.cell,alg)){ sel.cell=alg; state.freeMoveRemaining--; revealTile(alg,state.active); renderBoardObjects(); }
+      if(sel && canStep(sel.cell, alg)){
+        sel.cell=alg; state.freeMoveRemaining--; revealTileIfAny(alg, state.active);
+        log(`Pas gratuit: ${sel.id} → ${alg}.`);
+        renderPiecesAndForts();
+      }
+      return;
     }
-  });
-  function cellFromEvent(e){
-    const rect=board.getBoundingClientRect(), size=rect.width, inner=size-16, cell=inner/GRID;
-    const x=e.clientX-rect.left-8, y=e.clientY-rect.top-8;
-    let c=Math.floor(x/cell), rTop=Math.floor(y/cell), r=(GRID-1)-rTop;
-    c=Math.max(0,Math.min(GRID-1,c)); r=Math.max(0,Math.min(GRID-1,r));
-    return {c,r,cell};
-  }
-  function placeHL(c,r,cell){
-    const alg=toAlg(c,r);
-    if(forbidden.has(alg)){ hl.style.display='none'; return; }
-    const top=(GRID-1-r)*cell+8, left=c*cell+8;
-    hl.style.left=left+'px'; hl.style.top=top+'px'; hl.style.width=cell+'px'; hl.style.height=cell+'px'; hl.style.display='block';
   }
 
-  // ===== Pieces utils =====
-  function neighbors4(a){ const {c,r}=fromAlg(a); const outs=[]; [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dc,dr])=>{ const nc=c+dc, nr=r+dr; if(nc>=0&&nc<GRID&&nr>=0&&nr<GRID){ const x=toAlg(nc,nr); if(!forbidden.has(x)) outs.push(x); }}); return outs; }
-  function isAdjacent4(a,b){ return neighbors4(a).includes(b); }
-  function isLine(a,b){
-    const A=fromAlg(a), B=fromAlg(b); const dc=Math.sign(B.c-A.c), dr=Math.sign(B.r-A.r);
-    if(!(A.c===B.c || A.r===B.r || Math.abs(B.c-A.c)===Math.abs(B.r-A.r))) return null;
-    const seq=[]; let c=A.c+dc, r=A.r+dr; while(!(c===B.c && r===B.r)){ seq.push(toAlg(c,r)); c+=dc; r+=dr; } return seq;
+  function clearHighlights(){
+    document.querySelectorAll('.cell').forEach(c=>c.classList.remove('move-ok','move-bad','target-ok','hl'));
   }
-  function isLOS(a,b){ const between=isLine(a,b); if(!between) return false; return between.every(c=>!state.blocks.has(c) && !getPieceAt(c)); }
-  function getPieceAt(c){ for(const color of ['blue','red']){ const u=state.pieces[color].pieces.find(p=>p.cell===c); if(u) return {color,unit:u}; } return null; }
-  function findUnit(color,id){ return state.pieces[color].pieces.find(u=>u.id===id); }
-  function canStep(from,to){ if(!from||from===to) return false; if(!valid.has(to)||state.blocks.has(to)||getPieceAt(to)) return false; return isAdjacent4(from,to); }
+  function highlightSelection(){
+    clearHighlights();
+    if(!state.selected) return;
+    const sel=findUnit(state.selected.color, state.selected.id);
+    if(!sel || !sel.cell) return;
+    const cell=document.querySelector(`.cell[data-coord="${sel.cell}"]`);
+    if(cell) cell.classList.add('hl');
+  }
+  function highlightMoveTargets(from){
+    clearHighlights();
+    const neigh=neighbors4(from);
+    neigh.forEach(coord=>{
+      const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
+      if(!cell) return;
+      if(canStep(from,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
+    });
+    const here=document.querySelector(`.cell[data-coord="${from}"]`); if(here) here.classList.add('hl');
+  }
 
-  // ===== Cards play =====
+  // ===== Cards =====
   function playCard(color, idx){
     if(state.active!==color){ log('Pas votre tour.'); return; }
-    const max=3+(state.flags.extraCard?1:0);
-    if(state.firstTurnMode){
-      const allowance = (state.active===state.firstOrder?1:2);
-      if(state.played>=allowance){ log(`Tour 1: déjà ${allowance} carte(s).`); return; }
-    } else if(state.played>=max){ log('Limite de cartes jouées.'); return; }
-
     const card=state.pieces[color].hand[idx];
     switch(card.t){
-      case 'MOVE': doMovePrompt(color, card, idx); break;
-      case 'MELEE_SWAP': doMeleeOrSwap(color, idx); break;
-      case 'RANGE_TP': doRangeOrTP(color, idx); break;
-      case 'HEAL_REINFORCE': doHealOrReinforce(color, idx); break;
-      case 'BLOCK_UNBLOCK': doBlockOrUnblock(color, idx); break;
+      case 'MOVE': return playMoveCard(color, idx, card.n);
+      default: log('Seule la carte Déplacement est pertinente pour ce correctif.'); break;
     }
   }
-  function commit(color, idx){ const P=state.pieces[color]; const [c]=P.hand.splice(idx,1); P.discard.push(c); state.played++; renderHands(); updateDeckUI(); }
 
-  // MOVE
-  function doMovePrompt(color, card, idx){
-    if(!state.selected){ log('Sélectionnez un pion.'); return; }
-    const u=findUnit(state.selected.color, state.selected.id); if(!u||!u.cell){ log('Pion hors plateau.'); return; }
-    let remaining=card.n;
-    const onClick=(e)=>{
-      const cellEl = e.target.closest('.cell'); if(!cellEl) return;
-      const {c,r}=cellFromEvent(e); const alg=toAlg(c,r);
-      if(canStep(u.cell,alg)){ u.cell=alg; revealTile(alg,color); renderBoardObjects(); remaining--; if(remaining===0){ document.removeEventListener('click', onClick, true); commit(color, idx); } }
-    };
-    document.addEventListener('click', onClick, true);
-    log(`Déplacement ${card.n}: cliquez case par case.`);
+  function playMoveCard(color, handIdx, steps){
+    if(!state.selected){ log('Sélectionnez d\'abord un pion.'); return; }
+    const unit=findUnit(state.selected.color, state.selected.id);
+    if(!unit||!unit.cell){ log('Pion hors plateau.'); return; }
+    state.input={mode:'MOVE_CARD', remaining:steps, color, handIdx, unitId:unit.id};
+    highlightMoveTargets(unit.cell);
+    log(`Carte Déplacement ${steps}: cliquez case par case parmi les surbrillances vertes.`);
   }
 
-  // MELEE / SWAP
-  function doMeleeOrSwap(color, idx){
-    const mode=prompt('Entrez "CAC" ou "ECH" :','CAC'); if(!mode) return;
-    if(mode.toUpperCase()==='CAC'){ doMelee(color, idx); } else { doSwap(color, idx); }
-  }
-  function doMelee(color, idx){
-    if(!state.selected){ log('Sélectionnez l’attaquant.'); return; }
-    const u=findUnit(state.selected.color, state.selected.id); if(!u||!u.cell){ log('Pion hors plateau.'); return; }
-    const targets=neighbors4(u.cell).map(c=>getPieceAt(c)).filter(x=>x && x.color!==color);
-    if(!targets.length){ log('Aucun ennemi adjacent.'); return; }
-    if(attackBlockedByImmunity()){ log('Immunité tour 1.'); return; }
-    if(state.flags.disarmed){ log('Désarmé : pas d’attaque.'); return; }
-    if(state.flags.pressure){ promptDiscard(color==='blue'?'red':'blue',1); state.flags.pressure=false; }
-    rollDamage(targets[0].unit, targets[0].color);
-    commit(color, idx); renderBoardObjects();
-  }
-  function doSwap(color, idx){
-    if(state.flags.noMagic){ log('Anti-magie : pas d’Échange.'); return; }
-    if(!state.selected){ log('Sélectionnez votre pion.'); return; }
-    const self=findUnit(state.selected.color, state.selected.id); if(!self||!self.cell){ log('Pion hors plateau.'); return; }
-    const a=prompt('Coordonnée cible (allié ou ennemi avec LDV) :','');
-    if(!a||!valid.has(a)) return;
-    const occ=getPieceAt(a); if(!occ){ log('Pas de pion sur cette case.'); return; }
-    if(occ.color!==color && ((occ.color==='red' && RED_SPAWN.has(occ.unit.cell)) || (occ.color==='blue' && BLUE_SPAWN.has(occ.unit.cell)))){ log('Interdit : ennemi dans sa zone de départ.'); return; }
-    if(!isLOS(self.cell, occ.unit.cell)){ log('Pas de LDV.'); return; }
-    const tmp=self.cell; self.cell=occ.unit.cell; occ.unit.cell=tmp;
-    revealTile(self.cell,color); revealTile(occ.unit.cell,occ.color);
-    commit(color, idx); renderBoardObjects();
+  function commitCardMove(){
+    const {color, handIdx} = state.input;
+    const P=state.pieces[color];
+    const [c]=P.hand.splice(handIdx,1);
+    if(c) P.discard.push(c);
+    state.played++;
+    state.input={mode:null};
+    clearHighlights();
+    renderHands(); updateDeckUI();
   }
 
-  // RANGE / TP
-  function doRangeOrTP(color, idx){
-    const mode=prompt('Entrez "DIST" (tir) ou "TP" :','DIST'); if(!mode) return;
-    if(mode.toUpperCase()==='DIST'){ doRangedPrompt(color, idx); } else { doTP(color, idx); }
-  }
-  function isRangedValid(from,to){
-    const A=fromAlg(from), B=fromAlg(to); const dx=Math.abs(A.c-B.c), dy=Math.abs(A.r-B.r);
-    const ortho=(dx===0||dy===0) && (dx+dy>=2 && dx+dy<=4);
-    const diag=(dx===dy) && (dx>=1 && dx<=2);
-    if(!(ortho||diag)) return false;
-    if(isAdjacent4(from,to)) return false;
-    if(!isLOS(from,to)) return false;
-    return true;
-  }
-  function doRangedPrompt(color, idx){
-    if(state.flags.disarmed){ log('Désarmé : pas d’attaque.'); return; }
-    if(!state.selected){ log('Sélectionnez l’attaquant.'); return; }
-    const u=findUnit(state.selected.color,state.selected.id); if(!u||!u.cell){ log('Pion hors plateau.'); return; }
-    const a=prompt('Cible (coord) :',''); if(!a||!valid.has(a)) return;
-    const occ=getPieceAt(a); if(!occ||occ.color===color){ log('Cible invalide.'); return; }
-    if(!isRangedValid(u.cell,a)){ log('Portée/LDV invalide.'); return; }
-    if(attackBlockedByImmunity()){ log('Immunité tour 1.'); return; }
-    if(state.flags.pressure){ promptDiscard(color==='blue'?'red':'blue',1); state.flags.pressure=false; }
-    doRanged(u.cell,a,color,false);
-    commit(color, idx); renderBoardObjects();
-  }
-  function doRanged(from,to,color,free){
-    const t=getPieceAt(to); if(!t){ log('Tir sans cible.'); return; }
-    rollDamage(t.unit, t.color);
-  }
-  function doTP(color, idx){
-    if(state.flags.noMagic){ log('Anti-magie : pas de TP.'); return; }
-    if(!state.selected){ log('Sélectionnez le pion à TP.'); return; }
-    const u=findUnit(state.selected.color,state.selected.id); if(!u||!u.cell){ log('Pion hors plateau.'); return; }
-    const a=prompt('Destination libre (LDV illimitée, pas zone ennemie) :',''); if(!a||!valid.has(a)) return;
-    if(getPieceAt(a)||state.blocks.has(a)){ log('Case occupée/bloquée.'); return; }
-    if(!isLOS(u.cell,a)){ log('Pas de LDV.'); return; }
-    if(color==='blue' && RED_SPAWN.has(a)) { log('Interdit : zone rouge.'); return; }
-    if(color==='red'  && BLUE_SPAWN.has(a)) { log('Interdit : zone bleue.'); return; }
-    u.cell=a; revealTile(a,color); commit(color, idx); renderBoardObjects();
-  }
-
-  // HEAL / REINFORCE
-  function doHealOrReinforce(color, idx){
-    const m=prompt('"SOIN" (+2 PV forteresse, cap 10) ou "RENF" (poser un pion) :','SOIN'); if(!m) return;
-    if(m.toUpperCase()==='SOIN'){ const P=state.pieces[color]; P.fortHP=Math.min(10,P.fortHP+2); log(`${color} soigne sa forteresse (+2).`); }
-    else {
-      const P=state.pieces[color];
-      const res=P.pieces.find(u=>u.cell===null); if(!res){ log('Aucun pion en réserve.'); return; }
-      const zone=color==='blue'?[...BLUE_SPAWN]:[...RED_SPAWN];
-      const spot=zone.find(c=>!getPieceAt(c)); if(!spot){ log('Zone de départ pleine.'); return; }
-      const onBoard=P.pieces.filter(u=>u.cell).length; if(onBoard>=7){ log('Max 7 pions sur le plateau.'); return; }
-      res.cell=spot; log(`${color} pose ${res.id} en ${spot}.`);
-    }
-    commit(color, idx); renderBoardObjects();
-  }
-
-  // BLOCK / UNBLOCK
-  function doBlockOrUnblock(color, idx){
-    const m=prompt('"BLOC" (placer adjacent ortho) ou "DEBLOC" (retirer adjacent) :','BLOC'); if(!m) return;
-    if(m.toUpperCase()==='BLOC'){
-      if(state.blocks.size>=6){ log('Max blocs atteints (6).'); return; }
-      if(!state.selected){ log('Sélectionnez un pion.'); return; }
-      const u=findUnit(state.selected.color,state.selected.id); if(!u||!u.cell){ log('Pion hors plateau.'); return; }
-      const cand = neighbors4(u.cell).find(c=>!state.blocks.has(c) && !getPieceAt(c) && !RED_SPAWN.has(c) && !BLUE_SPAWN.has(c) && !ORANGE.has(c));
-      if(!cand){ log('Aucune case valide autour.'); return; }
-      state.blocks.add(cand); log(`Bloc placé en ${cand}.`);
-    } else {
-      if(!state.selected){ log('Sélectionnez un pion.'); return; }
-      const u=findUnit(state.selected.color,state.selected.id); if(!u||!u.cell){ log('Pion hors plateau.'); return; }
-      const cand = neighbors4(u.cell).find(c=>state.blocks.has(c)); if(!cand){ log('Aucun bloc adjacent.'); return; }
-      state.blocks.delete(cand); log(`Bloc retiré de ${cand}.`);
-    }
-    commit(color, idx); renderBoardObjects(); renderTop();
-  }
-
-  // ===== Combat & dégâts =====
-  function rollDamage(targetUnit, targetColor){
-    const roll=((Math.random()*6)|0)+1;
-    let dmg=(roll===1||roll===6)?2:1;
-    if(state.flags.weakenCrit && (roll===1||roll===6)) dmg=1;
-    targetUnit.hp-=dmg;
-    log(`Jet ${roll} → ${dmg} dégât(s) sur ${targetColor} ${targetUnit.id}.`);
-    if(targetUnit.hp<=0){ removeUnit(targetColor, targetUnit.id); }
-    state.flags.weakenCrit=false;
-    renderBoardObjects();
-  }
-  function removeUnit(color,id){
-    const P=state.pieces[color]; const i=P.pieces.findIndex(u=>u.id===id);
-    if(i>-1){ P.pieces[i].cell=null; P.pieces[i].hp=2; log(`${color} ${id} retiré du plateau.`); }
-  }
-  function attackBlockedByImmunity(){ return state.firstTurnMode; }
-
-  // ===== End turn & orange zone =====
-  function endTurn(){
-    // Dégâts zone orange (à la fin de TON tour, appliqués à l'adversaire)
-    const me=state.active, opp=me==='blue'?'red':'blue';
-    const cm=piecesOf(me).filter(u=>ORANGE.has(u.cell)).length;
-    const co=piecesOf(opp).filter(u=>ORANGE.has(u.cell)).length;
-    let delta=0; if(cm>=3) delta=2; else if(cm>=2 && co<=1) delta=1;
-    if(delta>0){ state.pieces[opp].fortHP=Math.max(0,state.pieces[opp].fortHP-delta); log(`Zone orange: ${opp} -${delta} PV.`); }
-
-    // Piocher jusqu'à 5 (ou 4 si Accroc)
-    if(state.flags.drawTo4){ drawTo(me,4); state.flags.drawTo4=false; } else { drawTo(me,5); }
-
-    // Reset flags tour
-    state.played=0; state.flags={}; state.freeMoveRemaining=0;
-
-    // Gestion tour 1
-    if(state.firstTurnMode){
-      if(state.active===state.firstOrder){ state.immunity.p1=false; state.active= (state.firstOrder==='blue'?'red':'blue'); }
-      else { state.immunity.p2=false; state.firstTurnMode=false; state.turn=1; state.active=state.firstOrder; }
-    } else { state.active=(state.active==='blue'?'red':'blue'); state.turn++; }
-
-    state.phase='préparation';
-    renderTop(); renderBoardObjects(); renderHands();
-  }
-
-  // ===== UI top =====
+  // ===== UI Top =====
   function renderTop(){
     $('#turnLabel').textContent=state.turn;
     $('#activePlayer').textContent=(state.active==='blue'?'🔵 Bleu':'🔴 Rouge');
@@ -622,24 +444,27 @@
     $('#blocksActive').textContent=state.blocks.size;
   }
 
-  // ===== Inline helpers =====
-  function promptDiscard(color,n){ const P=state.pieces[color]; while(n-->0 && P.hand.length){ P.discard.push(P.hand.pop()); } updateDeckUI(); renderHands(); }
-
   // ===== Buttons =====
   $('#btnPlaceTiles').addEventListener('click', place47);
   $('#btnReset').addEventListener('click', initGame);
-  $('#btnEndTurn').addEventListener('click', endTurn);
+  $('#btnEndTurn').addEventListener('click', ()=>{
+    // simple tour flip + reset flags pour ce correctif
+    state.turn++;
+    state.active=(state.active==='blue'?'red':'blue');
+    state.freeMoveRemaining=1; state.turnRevealedTile=false; state.played=0; state.flags={}; state.input={mode:null};
+    clearHighlights();
+    renderTop(); renderPiecesAndForts(); renderHands();
+  });
   $('#btnStart').addEventListener('click', ()=>{
     const rB=((Math.random()*6)|0)+1, rR=((Math.random()*6)|0)+1;
     const first = rB===rR ? (Math.random()<.5?'blue':'red') : (rB>rR?'blue':'red');
     state.firstOrder=first; state.active=first; state.phase='actions'; state.freeMoveRemaining=1;
-    log(`Jet 🔵=${rB}, 🔴=${rR}. ${first==='blue'?'Bleu':'Rouge'} commence. Immunité pour l'adversaire.`);
+    log(`Jet 🔵=${rB}, 🔴=${rR}. ${first==='blue'?'Bleu':'Rouge'} commence.`);
     renderTop();
   });
 
-  // ===== Start =====
+  // Start
   initGame();
-  window.addEventListener('resize', ()=>{ hl.style.display='none'; renderBoardObjects(); });
   </script>
 </body>
 </html>
