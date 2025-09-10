@@ -98,6 +98,12 @@
             <div class="small">J1: <span id="im1">✔</span> · J2: <span id="im2">✔</span></div>
           </div>
         </div>
+      <div class="sep"></div>
+      <!-- Affichage du nombre de cartes jouées ce tour -->
+      <div class="cardui">
+        <h4>Cartes jouées</h4>
+        <div class="small" id="cardsPlayed">0/3</div>
+      </div>
         <div class="sep"></div>
         <div class="cardui">
           <h4>Actions rapides</h4>
@@ -322,9 +328,21 @@
         box.appendChild(h);
         const s=document.createElement('div'); s.className='small'; s.textContent='#'+card.id; box.appendChild(s);
         const b=document.createElement('button'); b.className='btn playbtn'; b.textContent='Jouer';
-        if(state.active!==color) b.disabled=true;
+        // désactiver si ce n'est pas le tour du joueur, si la limite de cartes est atteinte ou si la partie est terminée
+        const limit = 3 + (state.flags.extraCard ? state.flags.extraCard : 0);
+        if(state.active!==color || state.played >= limit || state.gameOver) b.disabled=true;
         b.addEventListener('click', ()=> playCard(color, idx));
         box.appendChild(b);
+        // si cette carte est un déplacement en cours, proposer un bouton Défausser
+        if(card.t==='MOVE' && state.inProgress && state.inProgress.mode==='MOVE' && state.inProgress.cardId===card.id && !state.gameOver){
+          const cancelBtn=document.createElement('button'); cancelBtn.className='btn playbtn'; cancelBtn.style.marginTop='4px'; cancelBtn.textContent='Défausser';
+          cancelBtn.addEventListener('click', ()=>{
+            // Terminer le déplacement sans utiliser tous les pas
+            commitMoveInProgress();
+            renderBoard();
+          });
+          box.appendChild(cancelBtn);
+        }
         target.appendChild(box);
       });
     }
@@ -339,16 +357,27 @@
     // highlight selected unit
     if(state.selected){ const cell=document.querySelector(`.cell[data-coord="${state.selected.cell}"]`); if(cell) cell.classList.add('hl'); }
     // highlight move card path if in progress
-    if(state.inProgress && state.inProgress.mode==='MOVE'){
-      const {color, unitId} = state.inProgress;
-      const unit=findUnit(color, unitId);
-      if(unit && unit.cell){
-        neighbors4(unit.cell).forEach(coord=>{
+    if(state.inProgress){
+      if(state.inProgress.mode==='MOVE'){
+        const {color, unitId} = state.inProgress;
+        const unit=findUnit(color, unitId);
+        if(unit && unit.cell){
+          neighbors4(unit.cell).forEach(coord=>{
+            const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
+            if(!cell) return;
+            if(canStep(unit.cell,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
+          });
+          const here=document.querySelector(`.cell[data-coord="${unit.cell}"]`); if(here) here.classList.add('hl');
+        }
+      } else if(state.inProgress.mode==='BLOCK'){
+        // highlight candidates for block placement
+        state.inProgress.candidates.forEach(coord=>{
           const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
-          if(!cell) return;
-          if(canStep(unit.cell,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
+          if(cell) cell.classList.add('target-ok');
         });
-        const here=document.querySelector(`.cell[data-coord="${unit.cell}"]`); if(here) here.classList.add('hl');
+        // highlight selected unit
+        const u=findUnit(state.inProgress.color, state.inProgress.unitId);
+        if(u && u.cell){ const cell=document.querySelector(`.cell[data-coord="${u.cell}"]`); if(cell) cell.classList.add('hl'); }
       }
     } else if(state.selected && state.freeMoveRemaining>0){
       // free move neighbours
@@ -398,9 +427,14 @@
 
   // ===== Card play =====
   function playCard(color, idx){
+    // Ne rien faire si la partie est terminée
+    if(state.gameOver) return;
     // Not your turn
     if(state.active!==color){ log('Ce n\'est pas votre tour.'); return; }
-    // If a move is in progress, discard it before playing another card
+    // Respecter la limite de cartes jouées par tour (3 + bonus éventuel)
+    const limit = 3 + (state.flags.extraCard ? state.flags.extraCard : 0);
+    if(state.played >= limit){ log('Limite de cartes jouées atteinte.'); return; }
+    // Si un déplacement est en cours, le conclure avant de jouer une autre carte
     if(state.inProgress){ commitMoveInProgress(); }
     const P=state.pieces[color]; const card=P.hand[idx];
     if(!card) return;
@@ -432,6 +466,19 @@
     state.played++;
     state.inProgress=null;
     applyHighlights(); renderHands(); updateDeckUI();
+  }
+
+  function commitBlockInProgress(cell){
+    // Ajouter un bloc à l'emplacement spécifié et défausser la carte
+    const {color, cardId} = state.inProgress;
+    state.blocks.add(cell);
+    log(`Bloc placé en ${cell}.`);
+    const P = state.pieces[color];
+    const idx = P.hand.findIndex(c => c.id === cardId);
+    if(idx>=0){ const [card] = P.hand.splice(idx,1); if(card) P.discard.push(card); }
+    state.played++;
+    state.inProgress = null;
+    applyHighlights(); renderHands(); updateDeckUI(); renderBoard();
   }
 
   // ===== MELEE / ECH =====
@@ -562,11 +609,15 @@
       if(!state.selected || state.selected.color!==color){ log('Sélectionnez un pion pour placer un bloc.'); return; }
       const unit=findUnit(color,state.selected.id);
       if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
-      // choose an adjacent candidate that is free, not spawn/orange/fort
-      const cand=neighbors4(unit.cell).find(c=> !state.blocks.has(c) && !getPieceAt(c) && !RED_SPAWN.has(c) && !BLUE_SPAWN.has(c) && !ORANGE.has(c) && !isFortCell(c));
-      if(!cand){ log('Aucune case valide pour placer un bloc.'); return; }
-      state.blocks.add(cand);
-      log(`Bloc placé en ${cand}.`);
+      // déterminer les cases adjacentes valides pour placer un bloc
+      const candidates = neighbors4(unit.cell).filter(c=> !state.blocks.has(c) && !getPieceAt(c) && !RED_SPAWN.has(c) && !BLUE_SPAWN.has(c) && !ORANGE.has(c) && !isFortCell(c));
+      if(candidates.length===0){ log('Aucune case valide pour placer un bloc.'); return; }
+      // mettre en surbrillance ces cases et passer en mode BLOCK
+      const P=state.pieces[color]; const cardObj=P.hand[idx];
+      state.inProgress={mode:'BLOCK', color, unitId:unit.id, cardId:cardObj.id, candidates};
+      applyHighlights();
+      log('Sélectionnez une case jaune pour placer votre bloc.');
+      return;
     } else {
       if(!state.selected || state.selected.color!==color){ log('Sélectionnez un pion pour retirer un bloc.'); return; }
       const unit=findUnit(color,state.selected.id);
@@ -575,9 +626,10 @@
       if(!cand){ log('Aucun bloc adjacent à retirer.'); return; }
       state.blocks.delete(cand);
       log(`Bloc retiré de ${cand}.`);
+      const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
+      renderHands(); updateDeckUI(); renderBoard();
+      return;
     }
-    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
-    renderHands(); updateDeckUI(); renderBoard();
   }
 
   // ===== Combat & dégâts =====
@@ -597,13 +649,24 @@
     log(`Jet ${roll} → ${dmg} dégât(s) sur forteresse ${color}.`);
     state.flags.weakenCrit=false;
     renderBoard();
+    checkGameOver();
   }
   function removeUnit(color,id){ const P=state.pieces[color]; const idx=P.pieces.findIndex(u=>u.id===id); if(idx>-1){ P.pieces[idx].cell=null; P.pieces[idx].hp=2; log(`${color} ${id} retiré du plateau.`); } }
   function promptDiscard(color,n){ const P=state.pieces[color]; while(n-->0 && P.hand.length){ P.discard.push(P.hand.pop()); } updateDeckUI(); renderHands(); }
 
   // ===== Click handling =====
   function onCellClick(alg, cellEl){
-    // If a move card is in progress
+    // Bloquer tout clic si la partie est terminée
+    if(state.gameOver) return;
+    // Si un bloc est en cours de placement
+    if(state.inProgress && state.inProgress.mode==='BLOCK'){
+      // vérifier si la case cliquée est une candidate valable
+      if(cellEl.classList.contains('target-ok')){
+        commitBlockInProgress(alg);
+      }
+      return;
+    }
+    // Si un déplacement est en cours
     if(state.inProgress && state.inProgress.mode==='MOVE'){
       const info=state.inProgress; const unit=findUnit(info.color, info.unitId);
       if(!unit || !unit.cell) return;
@@ -639,6 +702,7 @@
     const oppCount=state.pieces[opp].pieces.filter(u=>u.cell && ORANGE.has(u.cell)).length;
     let delta=0; if(meCount>=3) delta=2; else if(meCount>=2 && oppCount<=1) delta=1;
     if(delta>0){ state.pieces[opp].fortHP=Math.max(0,state.pieces[opp].fortHP-delta); log(`Zone orange: forteresse ${opp} -${delta} PV.`); }
+    checkGameOver();
     // draw
     if(state.flags.drawTo4){ drawTo(me,4); state.flags.drawTo4=false; } else { drawTo(me,5); }
     state.played=0; state.flags={}; state.freeMoveRemaining=1; state.inProgress=null; state.selected=null;
@@ -648,6 +712,24 @@
     } else { state.active=(state.active==='blue'?'red':'blue'); state.turn++; }
     state.phase='actions';
     renderTop(); renderBoard(); renderHands();
+  }
+
+  // ===== Fin de partie =====
+  function checkGameOver(){
+    if(state.pieces.blue.fortHP<=0 || state.pieces.red.fortHP<=0){
+      const winner = state.pieces.blue.fortHP<=0 ? 'rouge' : 'bleu';
+      gameOver(winner);
+    }
+  }
+  function gameOver(winner){
+    if(state.gameOver) return;
+    state.gameOver = true;
+    log('Partie terminée ! Le joueur '+winner+' a gagné.');
+    // Désactiver toutes les actions
+    document.querySelectorAll('.playbtn').forEach(btn=> btn.disabled=true);
+    document.getElementById('btnEndTurn').disabled = true;
+    document.getElementById('btnPlaceTiles').disabled = true;
+    // Optionnel : offrir de réinitialiser
   }
 
   // ===== UI top =====
@@ -661,6 +743,12 @@
     $('#im2').textContent=state.immunity.p2?'✔':'—';
     $('#blocksActive').textContent=state.blocks.size;
     updateTilesUI();
+
+    // Mettre à jour l'affichage du nombre de cartes jouées
+    const limit = 3 + (state.flags.extraCard ? 1 : 0);
+    const played = state.played;
+    const cardsEl = document.getElementById('cardsPlayed');
+    if(cardsEl) cardsEl.textContent = `${played}/${limit}`;
   }
 
   // ===== Buttons =====
