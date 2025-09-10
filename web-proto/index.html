@@ -341,27 +341,74 @@
           default: h.textContent='Carte'; }
         box.appendChild(h);
         const s=document.createElement('div'); s.className='small'; s.textContent='#'+card.id; box.appendChild(s);
-        const b=document.createElement('button'); b.className='btn playbtn'; b.textContent='Jouer';
-        // désactiver le bouton selon l'état du jeu
+        // Limite de cartes jouées (utilisée pour l'activation des boutons)
         const limit = 3 + (state.flags.extraCard ? state.flags.extraCard : 0);
-        // Ne pas autoriser à jouer de carte si ce n'est pas la phase d'actions
-        if(state.phase !== 'actions' || state.active!==color || state.played >= limit || state.gameOver) b.disabled=true;
-        b.addEventListener('click', ()=> playCard(color, idx));
-        box.appendChild(b);
-        // si cette carte est un déplacement en cours, proposer un bouton Défausser/Annuler
-        if(card.t==='MOVE' && state.inProgress && state.inProgress.mode==='MOVE' && state.inProgress.cardId===card.id && !state.gameOver){
-          const cancelBtn=document.createElement('button'); cancelBtn.className='btn playbtn'; cancelBtn.style.marginTop='4px';
-          // Choisir le libellé selon s'il reste tous les pas (annuler) ou non (défausser)
-          cancelBtn.textContent = (state.inProgress.remaining === state.inProgress.initial) ? 'Annuler' : 'Défausser';
-          cancelBtn.addEventListener('click', ()=>{
-            if(state.inProgress && state.inProgress.remaining === state.inProgress.initial){
-              cancelMoveCard();
-            } else {
-              commitMoveInProgress();
-            }
-            renderBoard();
-          });
-          box.appendChild(cancelBtn);
+        // Fonction utilitaire pour savoir si on peut jouer une carte
+        function isActionDisabled(){
+          return state.phase !== 'actions' || state.active!==color || state.played >= limit || state.gameOver;
+        }
+        if(card.t === 'MOVE'){
+          // Bouton unique pour jouer une carte déplacement
+          const btn=document.createElement('button'); btn.className='btn playbtn'; btn.textContent='Jouer';
+          btn.disabled = isActionDisabled();
+          btn.addEventListener('click', ()=> playCard(color, idx));
+          box.appendChild(btn);
+          // si cette carte est un déplacement en cours, proposer un bouton Défausser/Annuler
+          if(state.inProgress && state.inProgress.mode==='MOVE' && state.inProgress.cardId===card.id && !state.gameOver){
+            const cancelBtn=document.createElement('button'); cancelBtn.className='btn playbtn'; cancelBtn.style.marginTop='4px';
+            cancelBtn.textContent = (state.inProgress.remaining === state.inProgress.initial) ? 'Annuler' : 'Défausser';
+            cancelBtn.addEventListener('click', ()=>{
+              if(state.inProgress && state.inProgress.remaining === state.inProgress.initial){
+                cancelMoveCard();
+              } else {
+                commitMoveInProgress();
+              }
+              renderBoard();
+            });
+            box.appendChild(cancelBtn);
+          }
+        } else if(card.t === 'MELEE_SWAP'){
+          // Deux boutons: attaque CAC et Échange
+          const btnMelee=document.createElement('button'); btnMelee.className='btn playbtn'; btnMelee.textContent='CAC';
+          btnMelee.disabled = isActionDisabled();
+          btnMelee.addEventListener('click', ()=> playMelee(color, idx));
+          const btnSwap=document.createElement('button'); btnSwap.className='btn playbtn'; btnSwap.style.marginLeft='4px'; btnSwap.textContent='Échange';
+          btnSwap.disabled = isActionDisabled();
+          btnSwap.addEventListener('click', ()=> playSwap(color, idx));
+          box.appendChild(btnMelee); box.appendChild(btnSwap);
+        } else if(card.t === 'RANGE_TP'){
+          // Deux boutons: attaque à distance et téléportation
+          const btnRange=document.createElement('button'); btnRange.className='btn playbtn'; btnRange.textContent='DIST';
+          btnRange.disabled = isActionDisabled();
+          btnRange.addEventListener('click', ()=> playRangeAttack(color, idx));
+          const btnTP=document.createElement('button'); btnTP.className='btn playbtn'; btnTP.style.marginLeft='4px'; btnTP.textContent='TP';
+          btnTP.disabled = isActionDisabled();
+          btnTP.addEventListener('click', ()=> playTeleport(color, idx));
+          box.appendChild(btnRange); box.appendChild(btnTP);
+        } else if(card.t === 'HEAL_REINFORCE'){
+          // Deux boutons: soin (immédiat) et renfort (placement)
+          const btnHeal=document.createElement('button'); btnHeal.className='btn playbtn'; btnHeal.textContent='SOIN';
+          btnHeal.disabled = isActionDisabled();
+          btnHeal.addEventListener('click', ()=> playHeal(color, idx));
+          const btnReinf=document.createElement('button'); btnReinf.className='btn playbtn'; btnReinf.style.marginLeft='4px'; btnReinf.textContent='RENF';
+          btnReinf.disabled = isActionDisabled();
+          btnReinf.addEventListener('click', ()=> playReinforce(color, idx));
+          box.appendChild(btnHeal); box.appendChild(btnReinf);
+        } else if(card.t === 'BLOCK_UNBLOCK'){
+          // Deux boutons: blocage et déblocage
+          const btnBlock=document.createElement('button'); btnBlock.className='btn playbtn'; btnBlock.textContent='BLOC';
+          btnBlock.disabled = isActionDisabled();
+          btnBlock.addEventListener('click', ()=> playBlock(color, idx));
+          const btnUnblock=document.createElement('button'); btnUnblock.className='btn playbtn'; btnUnblock.style.marginLeft='4px'; btnUnblock.textContent='DEBLOC';
+          btnUnblock.disabled = isActionDisabled();
+          btnUnblock.addEventListener('click', ()=> playUnblock(color, idx));
+          box.appendChild(btnBlock); box.appendChild(btnUnblock);
+        } else {
+          // Cas par défaut: bouton Jouer
+          const btn=document.createElement('button'); btn.className='btn playbtn'; btn.textContent='Jouer';
+          btn.disabled = isActionDisabled();
+          btn.addEventListener('click', ()=> playCard(color, idx));
+          box.appendChild(btn);
         }
         // En phase de préparation, proposer un bouton Défausser pour chaque carte tant qu'il reste des défausses
         if(state.phase === 'préparation' && state.active === color && state.discardLeft > 0 && !state.inProgress && !state.gameOver){
@@ -426,6 +473,19 @@
           if(cell) cell.classList.add('target-ok');
         });
         // highlight selected unit
+        const u = findUnit(state.inProgress.color, state.inProgress.unitId);
+        if(u && u.cell){
+          const cell = document.querySelector(`.cell[data-coord="${u.cell}"]`);
+          if(cell) cell.classList.add('hl');
+        }
+        return;
+      }
+      // Autres modes ciblés (MELEE, SWAP, RANGE, TP)
+      if(state.inProgress.mode === 'MELEE' || state.inProgress.mode === 'SWAP' || state.inProgress.mode === 'RANGE' || state.inProgress.mode === 'TP'){
+        state.inProgress.candidates.forEach(coord => {
+          const cell = document.querySelector(`.cell[data-coord="${coord}"]`);
+          if(cell) cell.classList.add('target-ok');
+        });
         const u = findUnit(state.inProgress.color, state.inProgress.unitId);
         if(u && u.cell){
           const cell = document.querySelector(`.cell[data-coord="${u.cell}"]`);
@@ -763,6 +823,321 @@
     }
   }
 
+  // ===== NEW: actions sans prompt =====
+  // Attaque de mêlée (CAC)
+  function playMelee(color, idx){
+    // Sélection et validité
+    if(!state.selected || state.selected.color !== color){ log('Sélectionnez un de vos pions pour attaquer.'); return; }
+    const unit = findUnit(color, state.selected.id);
+    if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+    // Déterminer les cibles adjacentes (ennemis ou fort adverse)
+    const neigh = neighbors4(unit.cell);
+    const candidates = [];
+    neigh.forEach(coord => {
+      if(coord === FORT_BLUE || coord === FORT_RED){
+        const fortColor = (coord === FORT_BLUE ? 'blue' : 'red');
+        if(fortColor !== color){
+          candidates.push(coord);
+        }
+      } else if(valid.has(coord)){
+        const occ = getPieceAt(coord);
+        if(occ && occ.color !== color){
+          candidates.push(coord);
+        }
+      }
+    });
+    if(candidates.length === 0){ log('Aucune cible adjacente.'); return; }
+    const P = state.pieces[color];
+    const cardObj = P.hand[idx];
+    state.inProgress = {mode:'MELEE', color, unitId: unit.id, cardId: cardObj.id, candidates};
+    applyHighlights();
+    log('Attaque CAC : choisissez une cible.');
+  }
+
+  // Validation de l'attaque de mêlée lorsque la case est cliquée
+  function commitMelee(alg){
+    const info = state.inProgress;
+    if(!info || info.mode !== 'MELEE') return;
+    const color = info.color;
+    const unit = findUnit(color, info.unitId);
+    if(!unit || !unit.cell){ state.inProgress=null; applyHighlights(); return; }
+    // Appliquer dégâts
+    if(alg === FORT_BLUE || alg === FORT_RED){
+      const fortColor = (alg === FORT_BLUE ? 'blue' : 'red');
+      if(fortColor !== color){ rollDamageFort(fortColor); }
+    } else {
+      const occ = getPieceAt(alg);
+      if(occ && occ.color !== color){ rollDamage(occ.unit, occ.color); }
+    }
+    if(state.flags.pressure){
+      const other = (color === 'blue' ? 'red' : 'blue');
+      promptDiscard(other, 1);
+      state.flags.pressure = false;
+    }
+    // Défausser la carte
+    const P = state.pieces[color];
+    const idx = P.hand.findIndex(c => c.id === info.cardId);
+    if(idx >= 0){ const card = P.hand.splice(idx,1)[0]; if(card) P.discard.push(card); }
+    state.played++;
+    state.inProgress = null;
+    state.selected = null;
+    applyHighlights();
+    renderHands(); updateDeckUI(); renderBoard();
+    checkGameOver();
+  }
+
+  // Échange
+  function playSwap(color, idx){
+    if(state.flags.noMagic){ log('Anti-magie: Échange impossible.'); return; }
+    if(!state.selected || state.selected.color !== color){ log('Sélectionnez un de vos pions pour échanger.'); return; }
+    const unit = findUnit(color, state.selected.id);
+    if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+    // Chercher tous les pions (alliés ou ennemis) en ligne de vue
+    const candidates = [];
+    ['blue','red'].forEach(clr => {
+      state.pieces[clr].pieces.forEach(p => {
+        if(p.cell){
+          if(clr === color && p.id === unit.id) return; // pas soi-même
+          // ligne de vue
+          if(isLOS(unit.cell, p.cell)){
+            // si ennemi, vérifier qu'il n'est pas dans sa zone de départ
+            if(clr !== color){
+              if((clr === 'red' && RED_SPAWN.has(p.cell)) || (clr === 'blue' && BLUE_SPAWN.has(p.cell))) return;
+            }
+            candidates.push(p.cell);
+          }
+        }
+      });
+    });
+    if(candidates.length === 0){ log('Aucun pion en ligne de vue pour échanger.'); return; }
+    const P = state.pieces[color];
+    const cardObj = P.hand[idx];
+    state.inProgress = {mode:'SWAP', color, unitId: unit.id, cardId: cardObj.id, candidates};
+    applyHighlights();
+    log('Échange : choisissez un pion en vue.');
+  }
+
+  function commitSwap(alg){
+    const info = state.inProgress;
+    if(!info || info.mode !== 'SWAP') return;
+    const color = info.color;
+    const unit = findUnit(color, info.unitId);
+    if(!unit || !unit.cell){ state.inProgress = null; applyHighlights(); return; }
+    if(alg === FORT_BLUE || alg === FORT_RED){ log('Impossible d\'échanger avec une forteresse.'); return; }
+    const occ = getPieceAt(alg);
+    if(!occ){ log('Aucun pion sur cette case.'); state.inProgress = null; applyHighlights(); return; }
+    // Vérifier de nouveau la zone de départ ennemie
+    if(occ.color !== color){
+      if((occ.color === 'red' && RED_SPAWN.has(occ.unit.cell)) || (occ.color === 'blue' && BLUE_SPAWN.has(occ.unit.cell))){
+        log('Interdit d\'échanger avec un ennemi dans sa zone de départ.');
+        state.inProgress = null;
+        applyHighlights();
+        return;
+      }
+    }
+    // Échanger les positions
+    const tmp = unit.cell;
+    unit.cell = occ.unit.cell;
+    occ.unit.cell = tmp;
+    revealTileIfAny(unit.cell, color);
+    revealTileIfAny(occ.unit.cell, occ.color);
+    // Défausser la carte
+    const P = state.pieces[color];
+    const idx = P.hand.findIndex(c => c.id === info.cardId);
+    if(idx >= 0){ const card = P.hand.splice(idx,1)[0]; if(card) P.discard.push(card); }
+    state.played++;
+    state.inProgress = null;
+    state.selected = null;
+    applyHighlights();
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
+  // Attaque à distance
+  function playRangeAttack(color, idx){
+    if(state.flags.disarmed){ log('Désarmé: pas d\'attaque.'); return; }
+    if(!state.selected || state.selected.color !== color){ log('Sélectionnez un de vos pions.'); return; }
+    const unit = findUnit(color, state.selected.id);
+    if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+    const candidates = [];
+    // Fort adverse
+    const enemyFort = (color === 'blue' ? FORT_RED : FORT_BLUE);
+    if(!isAdjacent4(unit.cell, enemyFort) && isLOS(unit.cell, enemyFort)){
+      const A = fromAlg(unit.cell);
+      const B = fromAlg(enemyFort);
+      const dx = Math.abs(A.c - B.c), dy = Math.abs(A.r - B.r);
+      const ortho = (dx === 0 || dy === 0) && (dx + dy >= 2 && dx + dy <= 4);
+      const diag = (dx === dy) && (dx >= 1 && dx <= 2);
+      if(ortho || diag) candidates.push(enemyFort);
+    }
+    // Pions ennemis
+    const enemyColor = (color === 'blue' ? 'red' : 'blue');
+    state.pieces[enemyColor].pieces.forEach(p => {
+      if(p.cell){
+        if(isAdjacent4(unit.cell, p.cell)) return; // adjacent non valide pour distance
+        if(!isLOS(unit.cell, p.cell)) return;
+        const A = fromAlg(unit.cell);
+        const B = fromAlg(p.cell);
+        const dx = Math.abs(A.c - B.c), dy = Math.abs(A.r - B.r);
+        const ortho = (dx === 0 || dy === 0) && (dx + dy >= 2 && dx + dy <= 4);
+        const diag = (dx === dy) && (dx >= 1 && dx <= 2);
+        if(ortho || diag) candidates.push(p.cell);
+      }
+    });
+    if(candidates.length === 0){ log('Aucune cible valide à distance.'); return; }
+    const P = state.pieces[color];
+    const cardObj = P.hand[idx];
+    state.inProgress = {mode:'RANGE', color, unitId: unit.id, cardId: cardObj.id, candidates};
+    applyHighlights();
+    log('Attaque à distance : choisissez une cible.');
+  }
+
+  function commitRangeAttack(alg){
+    const info = state.inProgress;
+    if(!info || info.mode !== 'RANGE') return;
+    const color = info.color;
+    const unit = findUnit(color, info.unitId);
+    if(!unit || !unit.cell){ state.inProgress = null; applyHighlights(); return; }
+    // Appliquer dégâts
+    if(alg === FORT_BLUE || alg === FORT_RED){
+      const fortColor = (alg === FORT_BLUE ? 'blue' : 'red');
+      if(fortColor !== color){ rollDamageFort(fortColor); }
+    } else {
+      const occ = getPieceAt(alg);
+      if(occ && occ.color !== color){ rollDamage(occ.unit, occ.color); }
+    }
+    if(state.flags.pressure){
+      const other = (color === 'blue' ? 'red' : 'blue');
+      promptDiscard(other, 1);
+      state.flags.pressure = false;
+    }
+    // Défausser la carte
+    const P = state.pieces[color];
+    const idx = P.hand.findIndex(c => c.id === info.cardId);
+    if(idx >= 0){ const card = P.hand.splice(idx,1)[0]; if(card) P.discard.push(card); }
+    state.played++;
+    state.inProgress = null;
+    state.selected = null;
+    applyHighlights();
+    renderHands(); updateDeckUI(); renderBoard();
+    checkGameOver();
+  }
+
+  // Téléportation
+  function playTeleport(color, idx){
+    if(state.flags.noMagic){ log('Anti-magie: pas de téléportation.'); return; }
+    if(!state.selected || state.selected.color !== color){ log('Sélectionnez un de vos pions pour téléporter.'); return; }
+    const unit = findUnit(color, state.selected.id);
+    if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+    const candidates = [];
+    valid.forEach(coord => {
+      if(getPieceAt(coord) || state.blocks.has(coord) || isFortCell(coord)) return;
+      // pas dans zone de spawn adverse
+      if(color === 'blue' && RED_SPAWN.has(coord)) return;
+      if(color === 'red' && BLUE_SPAWN.has(coord)) return;
+      if(!isLOS(unit.cell, coord)) return;
+      if(coord === unit.cell) return;
+      candidates.push(coord);
+    });
+    if(candidates.length === 0){ log('Aucune destination valide pour téléportation.'); return; }
+    const P = state.pieces[color];
+    const cardObj = P.hand[idx];
+    state.inProgress = {mode:'TP', color, unitId: unit.id, cardId: cardObj.id, candidates};
+    applyHighlights();
+    log('Téléportation : choisissez une case libre en vue.');
+  }
+
+  function commitTeleport(alg){
+    const info = state.inProgress;
+    if(!info || info.mode !== 'TP') return;
+    const color = info.color;
+    const unit = findUnit(color, info.unitId);
+    if(!unit || !unit.cell){ state.inProgress = null; applyHighlights(); return; }
+    if(getPieceAt(alg) || state.blocks.has(alg) || isFortCell(alg)){
+      state.inProgress = null;
+      applyHighlights();
+      return;
+    }
+    if(color === 'blue' && RED_SPAWN.has(alg)){ state.inProgress=null; applyHighlights(); return; }
+    if(color === 'red' && BLUE_SPAWN.has(alg)){ state.inProgress=null; applyHighlights(); return; }
+    if(!isLOS(unit.cell, alg)){ state.inProgress=null; applyHighlights(); return; }
+    unit.cell = alg;
+    revealTileIfAny(alg, color);
+    const P = state.pieces[color];
+    const idx = P.hand.findIndex(c => c.id === info.cardId);
+    if(idx >= 0){ const card = P.hand.splice(idx,1)[0]; if(card) P.discard.push(card); }
+    state.played++;
+    state.inProgress = null;
+    state.selected = null;
+    applyHighlights();
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
+  // Soin
+  function playHeal(color, idx){
+    const P = state.pieces[color];
+    // Appliquer +2 PV (max 10)
+    P.fortHP = Math.min(10, P.fortHP + 2);
+    log('Forteresse ' + (color === 'blue' ? 'bleue' : 'rouge') + ' soignée (+2).');
+    // Retirer la carte de la main
+    const card = P.hand[idx];
+    if(card){ P.hand.splice(idx,1); P.discard.push(card); }
+    state.played++;
+    state.selected = null;
+    applyHighlights();
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
+  // Renfort
+  function playReinforce(color, idx){
+    const P = state.pieces[color];
+    const reserve = P.pieces.find(u => u.cell === null);
+    if(!reserve){ log('Pas de pion en réserve.'); return; }
+    const onBoard = P.pieces.filter(u => u.cell).length;
+    if(onBoard >= 7){ log('Trop de pions sur le plateau.'); return; }
+    const cardObj = P.hand[idx];
+    // On stocke l'ID de la carte pour la défausser après placement
+    state.inProgress = {mode:'RENF', color, cardId: cardObj.id};
+    applyHighlights();
+    log((color === 'blue' ? '🔵' : '🔴') + ' Renfort : cliquez une case libre de votre zone pour poser le pion.');
+  }
+
+  // Blocage
+  function playBlock(color, idx){
+    if(state.blocks.size >= 6){ log('Maximum de blocs actifs.'); return; }
+    if(!state.selected || state.selected.color !== color){ log('Sélectionnez un pion pour placer un bloc.'); return; }
+    const unit = findUnit(color, state.selected.id);
+    if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+    const candidates = neighbors4(unit.cell).filter(coord => {
+      return !state.blocks.has(coord) && !getPieceAt(coord) && !RED_SPAWN.has(coord) && !BLUE_SPAWN.has(coord) && !ORANGE.has(coord) && !isFortCell(coord);
+    });
+    if(candidates.length === 0){ log('Aucune case valide pour placer un bloc.'); return; }
+    const P = state.pieces[color]; const cardObj = P.hand[idx];
+    state.inProgress = {mode:'BLOCK', color, unitId: unit.id, cardId: cardObj.id, candidates};
+    applyHighlights();
+    log('Sélectionnez une case jaune pour placer votre bloc.');
+  }
+
+  // Déblocage
+  function playUnblock(color, idx){
+    if(!state.selected || state.selected.color !== color){ log('Sélectionnez un pion pour retirer un bloc.'); return; }
+    const unit = findUnit(color, state.selected.id);
+    if(!unit || !unit.cell){ log('Pion hors plateau.'); return; }
+    const cand = neighbors4(unit.cell).find(c => state.blocks.has(c));
+    if(!cand){ log('Aucun bloc adjacent à retirer.'); return; }
+    state.blocks.delete(cand);
+    log(`Bloc retiré de ${cand}.`);
+    const P = state.pieces[color];
+    const cardObj = P.hand[idx];
+    if(cardObj){
+      const pos = P.hand.findIndex(c => c.id === cardObj.id);
+      if(pos >= 0){ const removed = P.hand.splice(pos,1)[0]; if(removed) P.discard.push(removed); }
+    }
+    state.played++;
+    state.selected = null;
+    applyHighlights();
+    renderHands(); updateDeckUI(); renderBoard();
+  }
+
   // ===== Combat & dégâts =====
   function rollDamage(targetUnit, targetColor){
     const roll=((Math.random()*6)|0)+1; let dmg=(roll===1||roll===6)?2:1;
@@ -888,6 +1263,27 @@
       return;
     }
 
+    // Modes de combat/ciblage
+    if(state.inProgress){
+      const mode = state.inProgress.mode;
+      if(mode === 'MELEE'){
+        if(cellEl.classList.contains('target-ok')) commitMelee(alg);
+        return;
+      }
+      if(mode === 'SWAP'){
+        if(cellEl.classList.contains('target-ok')) commitSwap(alg);
+        return;
+      }
+      if(mode === 'RANGE'){
+        if(cellEl.classList.contains('target-ok')) commitRangeAttack(alg);
+        return;
+      }
+      if(mode === 'TP'){
+        if(cellEl.classList.contains('target-ok')) commitTeleport(alg);
+        return;
+      }
+    }
+
     // Move card mode
     if(state.inProgress && state.inProgress.mode === 'MOVE'){
       const info = state.inProgress;
@@ -939,60 +1335,51 @@
   }
 
   // ===== End turn =====
-function endTurn(){
-  // Si on est en phase d'actions → bascule en préparation (défausse possible)
-  if(state.phase === 'actions'){
-    state.phase = 'préparation';
-    state.discardLeft = 2;
+  function endTurn(){
+    // If we are in the actions phase, switch to preparation: allow discarding up to 2 cards
+    if(state.phase === 'actions'){
+      state.phase = 'préparation';
+      state.discardLeft = 2;
+      // When entering preparation we reset selection and any in-progress actions
+      state.inProgress = null;
+      state.selected = null;
+      state.freeMoveRemaining = 0;
+      // Update UI: change button label via renderTop, and show discard buttons via renderHands
+      renderTop(); renderBoard(); renderHands();
+      log('Phase de préparation : vous pouvez défausser jusqu\'à 2 cartes.');
+      return;
+    }
+    // Otherwise we are in préparation: finalize the turn
+    // Apply zone orange damage for both players (dominant side damages the other)
+    applyZoneDamage();
+    // Pioche pour le joueur courant avant de changer d'actif
+    const me = state.active;
+    if(state.flags.drawTo4){ drawTo(me,4); state.flags.drawTo4=false; } else { drawTo(me,5); }
+    // Reset per-turn state
+    state.played = 0;
+    state.flags = {};
+    state.freeMoveRemaining = 1;
     state.inProgress = null;
     state.selected = null;
-    state.freeMoveRemaining = 0;
-    renderTop(); renderBoard(); renderHands();
-    log('Phase de préparation : vous pouvez défausser jusqu\'à 2 cartes.');
-    return;
-  }
-
-  // Sinon on est en préparation → finaliser le tour
-  // 1) Dégâts zone orange
-  applyZoneDamage();
-
-  // 2) Piocher pour le joueur courant (avant de changer active)
-  const me = state.active; // <-- clé du fix
-  if(state.flags.drawTo4){
-    drawTo(me, 4);
-    state.flags.drawTo4 = false;
-  } else {
-    drawTo(me, 5);
-  }
-
-  // 3) Reset d'état par tour
-  state.played = 0;
-  state.flags = {};
-  state.freeMoveRemaining = 1;
-  state.inProgress = null;
-  state.selected = null;
-  state.discardLeft = 0;
-
-  // 4) Avancer le tour / gérer l'immunité T1
-  if(state.firstTurnMode){
-    if(state.active === state.firstOrder){
-      state.immunity.p1 = false;
-      state.active = (state.firstOrder === 'blue' ? 'red' : 'blue');
+    state.discardLeft = 0;
+    // Advance to next active player, handling first turn mode
+    if(state.firstTurnMode){
+      if(state.active === state.firstOrder){
+        state.immunity.p1 = false;
+        state.active = (state.firstOrder === 'blue' ? 'red' : 'blue');
+      } else {
+        state.immunity.p2 = false;
+        state.firstTurnMode = false;
+        state.turn = 1;
+        state.active = state.firstOrder;
+      }
     } else {
-      state.immunity.p2 = false;
-      state.firstTurnMode = false;
-      state.turn = 1;
-      state.active = state.firstOrder;
+      state.active = (state.active === 'blue' ? 'red' : 'blue');
+      state.turn++;
     }
-  } else {
-    state.active = (state.active === 'blue' ? 'red' : 'blue');
-    state.turn++;
+    state.phase = 'actions';
+    renderTop(); renderBoard(); renderHands();
   }
-
-  // 5) Repasser en phase d'actions
-  state.phase = 'actions';
-  renderTop(); renderBoard(); renderHands();
-}
 
   // ===== Fin de partie =====
   function checkGameOver(){
