@@ -197,6 +197,7 @@
     played:0,
     freeMoveRemaining:0,
     inProgress:null, // {mode:'MOVE', color, unitId, cardId, remaining}
+    discardLeft:0, // number of cards the player may still discard in the preparation phase
     pieces:{
       blue:{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
       red :{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
@@ -308,8 +309,11 @@
   function draw(color,n){ const P=state.pieces[color]; while(n-->0){ if(P.deck.length===0) reshuffleIfNeeded(P); if(P.deck.length===0) break; P.hand.push(P.deck.pop()); } updateDeckUI(); }
   function drawTo(color,cap){ const P=state.pieces[color]; while(P.hand.length<cap){ if(P.deck.length===0) reshuffleIfNeeded(P); if(P.deck.length===0) break; P.hand.push(P.deck.pop()); } updateDeckUI(); }
   function updateDeckUI(){
-    $('#deckB').textContent=state.pieces.blue.deck.length;
-    $('#deckR').textContent=state.pieces.red.deck.length;
+    // Update deck display to show remaining / total (deck + hand + discard)
+    const blueTotal = state.pieces.blue.deck.length + state.pieces.blue.hand.length + state.pieces.blue.discard.length;
+    const redTotal  = state.pieces.red.deck.length  + state.pieces.red.hand.length  + state.pieces.red.discard.length;
+    $('#deckB').textContent = `${state.pieces.blue.deck.length} / ${blueTotal}`;
+    $('#deckR').textContent = `${state.pieces.red.deck.length} / ${redTotal}`;
     $('#discB').textContent=state.pieces.blue.discard.length;
     $('#discR').textContent=state.pieces.red.discard.length;
   }
@@ -328,16 +332,18 @@
         box.appendChild(h);
         const s=document.createElement('div'); s.className='small'; s.textContent='#'+card.id; box.appendChild(s);
         const b=document.createElement('button'); b.className='btn playbtn'; b.textContent='Jouer';
-        // désactiver si ce n'est pas le tour du joueur, si la limite de cartes est atteinte ou si la partie est terminée
+        // désactiver le bouton selon l'état du jeu
         const limit = 3 + (state.flags.extraCard ? state.flags.extraCard : 0);
-        if(state.active!==color || state.played >= limit || state.gameOver) b.disabled=true;
+        // Ne pas autoriser à jouer de carte si ce n'est pas la phase d'actions
+        if(state.phase !== 'actions' || state.active!==color || state.played >= limit || state.gameOver) b.disabled=true;
         b.addEventListener('click', ()=> playCard(color, idx));
         box.appendChild(b);
-        // si cette carte est un déplacement en cours, proposer un bouton Défausser
+        // si cette carte est un déplacement en cours, proposer un bouton Défausser/Annuler
         if(card.t==='MOVE' && state.inProgress && state.inProgress.mode==='MOVE' && state.inProgress.cardId===card.id && !state.gameOver){
-          const cancelBtn=document.createElement('button'); cancelBtn.className='btn playbtn'; cancelBtn.style.marginTop='4px'; cancelBtn.textContent='Défausser';
+          const cancelBtn=document.createElement('button'); cancelBtn.className='btn playbtn'; cancelBtn.style.marginTop='4px';
+          // Choisir le libellé selon s'il reste tous les pas (annuler) ou non (défausser)
+          cancelBtn.textContent = (state.inProgress.remaining === state.inProgress.initial) ? 'Annuler' : 'Défausser';
           cancelBtn.addEventListener('click', ()=>{
-            // Si aucun pas n'a été effectué, annuler sans défausser, sinon défausser
             if(state.inProgress && state.inProgress.remaining === state.inProgress.initial){
               cancelMoveCard();
             } else {
@@ -346,6 +352,17 @@
             renderBoard();
           });
           box.appendChild(cancelBtn);
+        }
+        // En phase de préparation, proposer un bouton Défausser pour chaque carte tant qu'il reste des défausses
+        if(state.phase === 'préparation' && state.active === color && state.discardLeft > 0 && !state.inProgress && !state.gameOver){
+          const discardBtn=document.createElement('button'); discardBtn.className='btn playbtn'; discardBtn.style.marginTop='4px'; discardBtn.textContent='Défausser';
+          discardBtn.addEventListener('click', ()=>{
+            const P=state.pieces[color]; const cardIndex=P.hand.findIndex(c=>c.id===card.id);
+            if(cardIndex>=0){ const [c]=P.hand.splice(cardIndex,1); if(c) P.discard.push(c); }
+            state.discardLeft--;
+            renderHands(); updateDeckUI();
+          });
+          box.appendChild(discardBtn);
         }
         target.appendChild(box);
       });
@@ -400,7 +417,9 @@
     Object.assign(state,{
       turn:0, active:'blue', phase:'préparation',
       firstTurnMode:true, firstOrder:null, immunity:{p1:true,p2:true},
-      blocks:new Set(), tiles:{}, selected:null, played:0, flags:{}, freeMoveRemaining:0, inProgress:null
+      blocks:new Set(), tiles:{}, selected:null, played:0, flags:{}, freeMoveRemaining:0, inProgress:null,
+      discardLeft:0,
+      gameOver:false
     });
     state.pieces.blue={fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
     state.pieces.red ={fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
@@ -435,6 +454,8 @@
     if(state.gameOver) return;
     // Not your turn
     if(state.active!==color){ log('Ce n\'est pas votre tour.'); return; }
+    // Only allow playing in phase 'actions'
+    if(state.phase !== 'actions'){ log('Vous n\'êtes pas en phase d\'actions.'); return; }
     // Respecter la limite de cartes jouées par tour (3 + bonus éventuel)
     const limit = 3 + (state.flags.extraCard ? state.flags.extraCard : 0);
     if(state.played >= limit){ log('Limite de cartes jouées atteinte.'); return; }
@@ -682,6 +703,36 @@
   function removeUnit(color,id){ const P=state.pieces[color]; const idx=P.pieces.findIndex(u=>u.id===id); if(idx>-1){ P.pieces[idx].cell=null; P.pieces[idx].hp=2; log(`${color} ${id} retiré du plateau.`); } }
   function promptDiscard(color,n){ const P=state.pieces[color]; while(n-->0 && P.hand.length){ P.discard.push(P.hand.pop()); } updateDeckUI(); renderHands(); }
 
+  // ===== Zone orange damage =====
+  function applyZoneDamage(){
+    // Compute counts for both players
+    const blueCount = state.pieces.blue.pieces.filter(u=>u.cell && ORANGE.has(u.cell)).length;
+    const redCount  = state.pieces.red.pieces.filter(u=>u.cell && ORANGE.has(u.cell)).length;
+    // Damage to red fort if blue dominates
+    if(blueCount >= 3){
+      const dmg=2;
+      state.pieces.red.fortHP = Math.max(0, state.pieces.red.fortHP - dmg);
+      log(`Zone orange : forteresse rouge -${dmg} PV.`);
+    } else if(blueCount >= 2 && redCount <= 1){
+      const dmg=1;
+      state.pieces.red.fortHP = Math.max(0, state.pieces.red.fortHP - dmg);
+      log(`Zone orange : forteresse rouge -${dmg} PV.`);
+    }
+    // Damage to blue fort if red dominates
+    if(redCount >= 3){
+      const dmg=2;
+      state.pieces.blue.fortHP = Math.max(0, state.pieces.blue.fortHP - dmg);
+      log(`Zone orange : forteresse bleue -${dmg} PV.`);
+    } else if(redCount >= 2 && blueCount <= 1){
+      const dmg=1;
+      state.pieces.blue.fortHP = Math.max(0, state.pieces.blue.fortHP - dmg);
+      log(`Zone orange : forteresse bleue -${dmg} PV.`);
+    }
+    // Ensure board re-renders and check game over
+    renderBoard();
+    checkGameOver();
+  }
+
   // ===== Click handling =====
   function onCellClick(alg, cellEl){
     // Bloquer tout clic si la partie est terminée
@@ -729,20 +780,47 @@
 
   // ===== End turn =====
   function endTurn(){
-    const me=state.active; const opp=(me==='blue'?'red':'blue');
-    const meCount=state.pieces[me].pieces.filter(u=>u.cell && ORANGE.has(u.cell)).length;
-    const oppCount=state.pieces[opp].pieces.filter(u=>u.cell && ORANGE.has(u.cell)).length;
-    let delta=0; if(meCount>=3) delta=2; else if(meCount>=2 && oppCount<=1) delta=1;
-    if(delta>0){ state.pieces[opp].fortHP=Math.max(0,state.pieces[opp].fortHP-delta); log(`Zone orange: forteresse ${opp} -${delta} PV.`); }
-    checkGameOver();
-    // draw
+    // If we are in the actions phase, switch to preparation: allow discarding up to 2 cards
+    if(state.phase === 'actions'){
+      state.phase = 'préparation';
+      state.discardLeft = 2;
+      // When entering preparation we reset selection and any in-progress actions
+      state.inProgress = null;
+      state.selected = null;
+      state.freeMoveRemaining = 0;
+      // Update UI: change button label via renderTop, and show discard buttons via renderHands
+      renderTop(); renderBoard(); renderHands();
+      log('Phase de préparation : vous pouvez défausser jusqu\'à 2 cartes.');
+      return;
+    }
+    // Otherwise we are in préparation: finalize the turn
+    // Apply zone orange damage for both players (dominant side damages the other)
+    applyZoneDamage();
+    // draw cards for the current player (me)
     if(state.flags.drawTo4){ drawTo(me,4); state.flags.drawTo4=false; } else { drawTo(me,5); }
-    state.played=0; state.flags={}; state.freeMoveRemaining=1; state.inProgress=null; state.selected=null;
+    // Reset per-turn state
+    state.played = 0;
+    state.flags = {};
+    state.freeMoveRemaining = 1;
+    state.inProgress = null;
+    state.selected = null;
+    state.discardLeft = 0;
+    // Advance to next active player, handling first turn mode
     if(state.firstTurnMode){
-      if(state.active===state.firstOrder){ state.immunity.p1=false; state.active=(state.firstOrder==='blue'?'red':'blue'); }
-      else { state.immunity.p2=false; state.firstTurnMode=false; state.turn=1; state.active=state.firstOrder; }
-    } else { state.active=(state.active==='blue'?'red':'blue'); state.turn++; }
-    state.phase='actions';
+      if(state.active === state.firstOrder){
+        state.immunity.p1 = false;
+        state.active = (state.firstOrder === 'blue' ? 'red' : 'blue');
+      } else {
+        state.immunity.p2 = false;
+        state.firstTurnMode = false;
+        state.turn = 1;
+        state.active = state.firstOrder;
+      }
+    } else {
+      state.active = (state.active === 'blue' ? 'red' : 'blue');
+      state.turn++;
+    }
+    state.phase = 'actions';
     renderTop(); renderBoard(); renderHands();
   }
 
@@ -781,6 +859,14 @@
     const played = state.played;
     const cardsEl = document.getElementById('cardsPlayed');
     if(cardsEl) cardsEl.textContent = `${played}/${limit}`;
+
+    // Changer l'étiquette du bouton de fin de tour en fonction de la phase
+    const endBtn = document.getElementById('btnEndTurn');
+    if(endBtn){
+      if(state.phase === 'actions') endBtn.textContent = 'Fin de tour'; else if(state.phase === 'préparation') endBtn.textContent = 'Terminer préparation';
+      // Désactiver le bouton si la partie est finie
+      endBtn.disabled = !!state.gameOver;
+    }
   }
 
   // ===== Buttons =====
