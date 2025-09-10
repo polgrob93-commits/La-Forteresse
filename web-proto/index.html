@@ -198,6 +198,8 @@
     freeMoveRemaining:0,
     inProgress:null, // {mode:'MOVE', color, unitId, cardId, remaining}
     discardLeft:0, // number of cards the player may still discard in the preparation phase
+    // NEW: track setup phase for initial placement (mode: 'blue' or 'red'; placed count; done)
+    setup:{ mode:'', placed:0, done:false },
     pieces:{
       blue:{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
       red :{fortHP:7, pieces:[], hand:[], deck:[], discard:[]},
@@ -235,6 +237,14 @@
     if(isFortCell(to)) return false;
     if(!valid.has(to)||state.blocks.has(to)||getPieceAt(to)) return false;
     return isAdjacent4(from,to);
+  }
+
+  // NEW: check if a spawn cell is free for a pion (no fort, no block, no other pion)
+  function spawnCellFree(color, cell){
+    if(isFortCell(cell)) return false;
+    if(state.blocks.has(cell)) return false;
+    if(getPieceAt(cell)) return false;
+    return true;
   }
 
   // ===== Board build =====
@@ -375,40 +385,80 @@
     cell.classList.remove('move-ok','move-bad','hl','target-ok'); }); }
   function applyHighlights(){
     clearHighlights();
+    // NEW: during setup (initial placement), highlight spawn cells for current color
+    if(!state.setup.done){
+      const color = state.setup.mode;
+      const spawn = color === 'blue' ? BLUE_SPAWN : RED_SPAWN;
+      spawn.forEach(coord=>{
+        if(spawnCellFree(color, coord)){
+          const cell = document.querySelector(`.cell[data-coord="${coord}"]`);
+          if(cell) cell.classList.add('target-ok');
+        }
+      });
+      return;
+    }
     // highlight selected unit
-    if(state.selected){ const cell=document.querySelector(`.cell[data-coord="${state.selected.cell}"]`); if(cell) cell.classList.add('hl'); }
-    // highlight move card path if in progress
+    if(state.selected){
+      const cell = document.querySelector(`.cell[data-coord="${state.selected.cell}"]`);
+      if(cell) cell.classList.add('hl');
+    }
+    // highlight for actions in progress
     if(state.inProgress){
-      if(state.inProgress.mode==='MOVE'){
+      if(state.inProgress.mode === 'MOVE'){
         const {color, unitId} = state.inProgress;
-        const unit=findUnit(color, unitId);
+        const unit = findUnit(color, unitId);
         if(unit && unit.cell){
           neighbors4(unit.cell).forEach(coord=>{
-            const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
+            const cell = document.querySelector(`.cell[data-coord="${coord}"]`);
             if(!cell) return;
-            if(canStep(unit.cell,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
+            if(canStep(unit.cell,coord)) cell.classList.add('move-ok');
+            else cell.classList.add('move-bad');
           });
-          const here=document.querySelector(`.cell[data-coord="${unit.cell}"]`); if(here) here.classList.add('hl');
+          const here = document.querySelector(`.cell[data-coord="${unit.cell}"]`);
+          if(here) here.classList.add('hl');
         }
-      } else if(state.inProgress.mode==='BLOCK'){
+        return;
+      }
+      if(state.inProgress.mode === 'BLOCK'){
         // highlight candidates for block placement
         state.inProgress.candidates.forEach(coord=>{
-          const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
+          const cell = document.querySelector(`.cell[data-coord="${coord}"]`);
           if(cell) cell.classList.add('target-ok');
         });
         // highlight selected unit
-        const u=findUnit(state.inProgress.color, state.inProgress.unitId);
-        if(u && u.cell){ const cell=document.querySelector(`.cell[data-coord="${u.cell}"]`); if(cell) cell.classList.add('hl'); }
+        const u = findUnit(state.inProgress.color, state.inProgress.unitId);
+        if(u && u.cell){
+          const cell = document.querySelector(`.cell[data-coord="${u.cell}"]`);
+          if(cell) cell.classList.add('hl');
+        }
+        return;
       }
-    } else if(state.selected && state.freeMoveRemaining>0){
-      // free move neighbours
-      const unit=findUnit(state.selected.color, state.selected.id);
-      if(unit && unit.cell){ neighbors4(unit.cell).forEach(coord=>{
-        const cell=document.querySelector(`.cell[data-coord="${coord}"]`);
-        if(!cell) return;
-        if(canStep(unit.cell,coord)) cell.classList.add('move-ok'); else cell.classList.add('move-bad');
-      });
-      const here=document.querySelector(`.cell[data-coord="${unit.cell}"]`); if(here) here.classList.add('hl'); }
+      if(state.inProgress.mode === 'RENF'){
+        // highlight spawn cells for reinforcements
+        const color = state.inProgress.color;
+        const spawn = color === 'blue' ? BLUE_SPAWN : RED_SPAWN;
+        spawn.forEach(coord=>{
+          if(spawnCellFree(color, coord)){
+            const cell = document.querySelector(`.cell[data-coord="${coord}"]`);
+            if(cell) cell.classList.add('target-ok');
+          }
+        });
+        return;
+      }
+    }
+    // highlight for free move if available
+    if(state.selected && state.freeMoveRemaining > 0){
+      const unit = findUnit(state.selected.color, state.selected.id);
+      if(unit && unit.cell){
+        neighbors4(unit.cell).forEach(coord=>{
+          const cell = document.querySelector(`.cell[data-coord="${coord}"]`);
+          if(!cell) return;
+          if(canStep(unit.cell,coord)) cell.classList.add('move-ok');
+          else cell.classList.add('move-bad');
+        });
+        const here = document.querySelector(`.cell[data-coord="${unit.cell}"]`);
+        if(here) here.classList.add('hl');
+      }
     }
   }
 
@@ -423,14 +473,20 @@
     });
     state.pieces.blue={fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
     state.pieces.red ={fortHP:7, pieces:[], hand:[], deck:shuffle(buildDeck26()), discard:[]};
-    // place pions: 5 in spawn, 2 reserve
-    shuffle([...BLUE_SPAWN]).slice(0,5).forEach((cell,i)=>state.pieces.blue.pieces.push({id:`B${i+1}`,cell,hp:2}));
-    state.pieces.blue.pieces.push({id:'B6',cell:null,hp:2}); state.pieces.blue.pieces.push({id:'B7',cell:null,hp:2});
-    shuffle([...RED_SPAWN]).slice(0,5).forEach((cell,i)=>state.pieces.red.pieces.push({id:`R${i+1}`,cell,hp:2}));
-    state.pieces.red.pieces.push({id:'R6',cell:null,hp:2}); state.pieces.red.pieces.push({id:'R7',cell:null,hp:2});
+    // build 7 pions per color in reserve (no initial placement)
+    state.pieces.blue.pieces = [];
+    state.pieces.red.pieces  = [];
+    for(let i=1; i<=7; i++){
+      state.pieces.blue.pieces.push({id:`B${i}`, cell:null, hp:2});
+      state.pieces.red.pieces.push({id:`R${i}`, cell:null, hp:2});
+    }
+    // initialize setup phase: blue places first, 5 pions each
+    state.setup = {mode:'blue', placed:0, done:false};
+    // draw initial hands
     drawTo('blue',5); drawTo('red',5);
+    // build grid and render
     buildGrid(); renderBoard(); renderHands(); renderTop();
-    log('Nouvelle partie. Place 47 tuiles puis tire le premier joueur.');
+    log('Nouvelle partie. Placez 5 pions bleus, puis 5 pions rouges en cliquant dans les zones en surbrillance. Ensuite placez 47 tuiles et tirez le premier joueur.');
   }
 
   // ===== Tiles =====
@@ -636,18 +692,44 @@
 
   // ===== HEAL / REINFORCE =====
   function playHealOrReinforce(color, idx){
-    const choice=prompt('"SOIN" pour +2 PV forteresse (max 10) ou "RENF" pour renfort:','SOIN'); if(!choice) return;
-    if(choice.toUpperCase()==='SOIN'){ const P=state.pieces[color]; P.fortHP=Math.min(10,P.fortHP+2); log('Forteresse '+color+' soignée (+2).'); }
-    else {
-      const P=state.pieces[color]; const reserve=P.pieces.find(u=>u.cell===null);
-      if(!reserve){ log('Pas de pion en réserve.'); return; }
-      const zone=color==='blue'? [...BLUE_SPAWN]:[...RED_SPAWN];
-      const spot=zone.find(c=>!getPieceAt(c)); if(!spot){ log('Zone de départ pleine.'); return; }
-      const onBoard=P.pieces.filter(u=>u.cell).length; if(onBoard>=7){ log('Trop de pions sur le plateau.'); return; }
-      reserve.cell=spot; log(`Renfort: ${reserve.id} placé en ${spot}.`);
+    const choice = prompt('"SOIN" pour +2 PV forteresse (max 10) ou "RENF" pour renfort:', 'SOIN');
+    if(!choice) return;
+    if(choice.toUpperCase() === 'SOIN'){
+      // soin: augmenter PV forteresse et défausser la carte immédiatement
+      const P = state.pieces[color];
+      P.fortHP = Math.min(10, P.fortHP + 2);
+      log('Forteresse '+color+' soignée (+2).');
+      // retirer la carte de la main
+      const P2 = state.pieces[color];
+      const card = P2.hand[idx];
+      if(card){
+        P2.hand.splice(idx,1);
+        P2.discard.push(card);
+      }
+      state.played++;
+      renderHands();
+      updateDeckUI();
+      renderBoard();
+    } else {
+      // renfort: entrer en mode de placement interactif
+      const P = state.pieces[color];
+      const reserve = P.pieces.find(u => u.cell === null);
+      if(!reserve){
+        log('Pas de pion en réserve.');
+        return;
+      }
+      const onBoard = P.pieces.filter(u => u.cell).length;
+      if(onBoard >= 7){
+        log('Trop de pions sur le plateau.');
+        return;
+      }
+      // garder la carte et noter son id pour défausse après placement
+      const cardObj = P.hand[idx];
+      state.inProgress = {mode:'RENF', color, cardId: cardObj.id};
+      applyHighlights();
+      log((color==='blue'?'🔵':'🔴')+' Renfort : cliquez une case libre de votre zone pour poser le pion.');
+      // on ne retire pas encore la carte : ce sera fait lors du placement effectif
     }
-    const P=state.pieces[color]; const [card]=P.hand.splice(idx,1); if(card) P.discard.push(card); state.played++;
-    renderHands(); updateDeckUI(); renderBoard();
   }
 
   // ===== BLOCK / UNBLOCK =====
@@ -735,45 +817,123 @@
 
   // ===== Click handling =====
   function onCellClick(alg, cellEl){
-    // Bloquer tout clic si la partie est terminée
+    // NEW: do nothing if game is over
     if(state.gameOver) return;
-    // Si un bloc est en cours de placement
-    if(state.inProgress && state.inProgress.mode==='BLOCK'){
-      // vérifier si la case cliquée est une candidate valable
+
+    // Setup: place pions at start
+    if(!state.setup.done){
+      const color = state.setup.mode;
+      const spawn = color === 'blue' ? BLUE_SPAWN : RED_SPAWN;
+      if(spawn.has(alg) && spawnCellFree(color, alg)){
+        const P = state.pieces[color];
+        const idx = P.pieces.findIndex(u => !u.cell);
+        if(idx >= 0){
+          P.pieces[idx].cell = alg;
+          state.setup.placed++;
+          log(`${color==='blue'?'🔵':'🔴'} place ${P.pieces[idx].id} en ${alg} (${state.setup.placed}/5).`);
+          if(state.setup.placed >= 5){
+            if(color === 'blue'){
+              state.setup = {mode:'red', placed:0, done:false};
+              log('Placement initial : 🔴 place 5 pions dans sa zone.');
+            } else {
+              state.setup = {mode:'', placed:0, done:true};
+              log('Placement initial terminé. Cliquez « Déterminer le 1er joueur ».');
+            }
+          }
+          renderBoard();
+          renderHands();
+          renderTop();
+        }
+      }
+      return;
+    }
+
+    // Renfort placement
+    if(state.inProgress && state.inProgress.mode === 'RENF'){
+      const color = state.inProgress.color;
+      const spawn = color === 'blue' ? BLUE_SPAWN : RED_SPAWN;
+      if(spawn.has(alg) && spawnCellFree(color, alg)){
+        const P = state.pieces[color];
+        const reserve = P.pieces.find(u => u.cell === null);
+        if(!reserve){
+          log('Pas de pion en réserve.');
+        } else {
+          const onBoard = P.pieces.filter(u => u.cell).length;
+          if(onBoard >= 7){
+            log('Maximum 7 pions sur le plateau.');
+          } else {
+            reserve.cell = alg;
+            log(`Renfort: ${reserve.id} placé en ${alg}.`);
+            const idxCard = P.hand.findIndex(c => c.id === state.inProgress.cardId);
+            if(idxCard >= 0){
+              const card = P.hand.splice(idxCard, 1)[0];
+              if(card) P.discard.push(card);
+            }
+            state.played++;
+            state.inProgress = null;
+            renderBoard();
+            renderHands();
+            updateDeckUI();
+          }
+        }
+      }
+      return;
+    }
+
+    // Block placement
+    if(state.inProgress && state.inProgress.mode === 'BLOCK'){
       if(cellEl.classList.contains('target-ok')){
         commitBlockInProgress(alg);
       }
       return;
     }
-    // Si un déplacement est en cours
-    if(state.inProgress && state.inProgress.mode==='MOVE'){
-      const info=state.inProgress; const unit=findUnit(info.color, info.unitId);
+
+    // Move card mode
+    if(state.inProgress && state.inProgress.mode === 'MOVE'){
+      const info = state.inProgress;
+      const unit = findUnit(info.color, info.unitId);
       if(!unit || !unit.cell) return;
-      // Si clic sur une case qui n'est pas une destination valide
       if(!cellEl.classList.contains('move-ok')){
-        // Si aucun pas effectué, annuler le déplacement
-        if(info.remaining === info.initial){ cancelMoveCard(); }
+        if(info.remaining === info.initial){
+          cancelMoveCard();
+        }
         return;
       }
-      const from=unit.cell; unit.cell=alg;
-      // update selection cell for highlight
-      if(state.selected && state.selected.color===info.color && state.selected.id===unit.id){ state.selected.cell=alg; }
+      const from = unit.cell;
+      unit.cell = alg;
+      if(state.selected && state.selected.color === info.color && state.selected.id === unit.id){
+        state.selected.cell = alg;
+      }
       revealTileIfAny(alg, info.color);
       info.remaining--;
       log(`Déplacement carte: ${from} → ${alg} (reste ${info.remaining}).`);
-      if(info.remaining<=0){ commitMoveInProgress(); }
-      renderBoard(); return;
+      if(info.remaining <= 0){
+        commitMoveInProgress();
+      }
+      renderBoard();
+      return;
     }
-    // else selection
-    const occ=getPieceAt(alg);
-    if(occ && occ.color===state.active){ state.selected={color:occ.color,id:occ.unit.id, cell:occ.unit.cell}; applyHighlights(); return; }
-    // free move
-    if(state.selected && state.freeMoveRemaining>0){ const unit=findUnit(state.selected.color, state.selected.id);
+
+    // Normal selection
+    const occ = getPieceAt(alg);
+    if(occ && occ.color === state.active){
+      state.selected = {color: occ.color, id: occ.unit.id, cell: occ.unit.cell};
+      applyHighlights();
+      return;
+    }
+
+    // Free move
+    if(state.selected && state.freeMoveRemaining > 0){
+      const unit = findUnit(state.selected.color, state.selected.id);
       if(unit && canStep(unit.cell, alg)){
-        unit.cell=alg; state.selected.cell=alg; state.freeMoveRemaining--;
-        revealTileIfAny(alg,state.active);
+        const from = unit.cell;
+        unit.cell = alg;
+        state.selected.cell = alg;
+        state.freeMoveRemaining--;
+        revealTileIfAny(alg, state.active);
         log(`Pas gratuit: ${unit.id} → ${alg}.`);
-        renderBoard(); return;
+        renderBoard();
+        return;
       }
     }
   }
@@ -797,8 +957,6 @@
     // Apply zone orange damage for both players (dominant side damages the other)
     applyZoneDamage();
     // draw cards for the current player (me)
-    // define current player before drawing to avoid undefined variable
-    const me = state.active;
     if(state.flags.drawTo4){ drawTo(me,4); state.flags.drawTo4=false; } else { drawTo(me,5); }
     // Reset per-turn state
     state.played = 0;
@@ -865,9 +1023,15 @@
     // Changer l'étiquette du bouton de fin de tour en fonction de la phase
     const endBtn = document.getElementById('btnEndTurn');
     if(endBtn){
-      if(state.phase === 'actions') endBtn.textContent = 'Fin de tour'; else if(state.phase === 'préparation') endBtn.textContent = 'Terminer préparation';
-      // Désactiver le bouton si la partie est finie
-      endBtn.disabled = !!state.gameOver;
+      // Désactiver pendant la phase de placement initial
+      if(!state.setup.done){
+        endBtn.disabled = true;
+        endBtn.textContent = 'Placement...';
+      } else {
+        if(state.phase === 'actions') endBtn.textContent = 'Fin de tour'; else if(state.phase === 'préparation') endBtn.textContent = 'Terminer préparation';
+        // Désactiver le bouton si la partie est finie
+        endBtn.disabled = !!state.gameOver;
+      }
     }
   }
 
