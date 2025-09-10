@@ -7,10 +7,16 @@
 <style>
   :root { --grid: 9; }
   html, body {
-    height:100%; margin:0; background:#111; color:#eee;
+    height:100%;
+    margin:0;
+    background:#111;
+    color:#eee;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   }
-  .wrap { max-width: 92vmin; margin: 24px auto; }
+  .wrap {
+    max-width: 92vmin;
+    margin: 24px auto;
+  }
   #board {
     position: relative;
     width: 100%;
@@ -22,13 +28,13 @@
     box-shadow: 0 10px 30px rgba(0,0,0,.4);
     user-select: none;
   }
-
-  /* Grille 9×9 avec vraies lignes noires (sans double bordure) */
+  /* Grille 9×9 avec vraies lignes noires */
   #cells {
-    position:absolute; inset:0;
+    position:absolute;
+    inset:0;
     display:grid;
-    grid-template-columns: repeat(9, 1fr);
-    grid-template-rows: repeat(9, 1fr);
+    grid-template-columns: repeat(var(--grid), 1fr);
+    grid-template-rows: repeat(var(--grid), 1fr);
     border-right: 2px solid #000;
     border-bottom: 2px solid #000;
   }
@@ -38,33 +44,46 @@
     box-sizing: border-box;
     position: relative;
   }
-
-  /* Calque qui capte les clics + surbrillance */
-  #hit { position:absolute; inset:0; cursor:pointer; }
+  /* Calque de clic + surbrillance */
+  #hit {
+    position:absolute;
+    inset:0;
+    cursor:pointer;
+  }
   #highlight {
-    position:absolute; border:2px solid rgba(255,255,255,.9);
-    pointer-events:none; display:none;
+    position:absolute;
+    border:2px solid rgba(255,255,255,.9);
+    pointer-events:none;
+    display:none;
     transform: translate(-1px,-1px);
   }
-
-  /* Cube “forteresse” (taille exacte d’une case) */
+  /* Forteresses : carrés pleins centrés avec PV */
   .fortress {
-    position:absolute; width:0; height:0; /* on set en JS */
-    transform: translate(-1px,-1px);
-    box-sizing: border-box;
-    border: 2px solid #000;
+    position:absolute;
+    border:2px solid #000;
+    box-sizing:border-box;
+    display:grid;
+    place-items:center;
+    font-weight:700;
+    color:#fff;
+    text-shadow:0 1px 2px rgba(0,0,0,.6);
   }
   .fortress.blue { background:#2a6df5; }
   .fortress.red  { background:#e24b4b; }
 
-  /* Couleurs d’info légères (on garde discret pour le test) */
+  /* Couleurs d’info (zones spéciales) */
   .zone-orange { background: rgba(255,140,0,0.28); }
   .zone-red    { background: rgba(255,0,0,0.28); }
   .zone-blue   { background: rgba(0,0,255,0.28); }
 
   .log {
-    margin-top:10px; background:#1a1f2c; border:1px solid #2a3142;
-    padding:10px; border-radius:10px; font-size:14px; min-height:36px;
+    margin-top:10px;
+    background:#1a1f2c;
+    border:1px solid #2a3142;
+    padding:10px;
+    border-radius:10px;
+    font-size:14px;
+    min-height:36px;
   }
 </style>
 </head>
@@ -74,21 +93,22 @@
       <div id="cells"></div>
       <div id="hit" aria-label="zone interactive"></div>
       <div id="highlight"></div>
-      <!-- Les cubes-forteresse sont injectés en JS -->
     </div>
-    <div class="log" id="log">Clique sur une case valide (A1…I9). Les cases inexistantes ne réagissent pas.</div>
+    <div class="log" id="log">
+      Clique sur une case valide (A1…I9). Les cases inexistantes ne réagissent pas.
+    </div>
   </div>
 
 <script>
   const GRID = 9;
   const COLS = "ABCDEFGHI";
-  const board = document.getElementById('board');
-  const cells = document.getElementById('cells');
-  const hit = document.getElementById('hit');
-  const highlight = document.getElementById('highlight');
-  const logEl = document.getElementById('log');
+  const board    = document.getElementById('board');
+  const cells    = document.getElementById('cells');
+  const hit      = document.getElementById('hit');
+  const highlight= document.getElementById('highlight');
+  const logEl    = document.getElementById('log');
 
-  // ❌ Cases inexistantes (ni visibles, ni cliquables, ni surlignables)
+  // Définition des cases inexistantes : ces coordonnées n'existent pas
   const forbiddenCells = new Set([
     "A1","B1","C1",
     "A2","B2","C2",
@@ -98,7 +118,7 @@
     "H7","I7"
   ]);
 
-  // ✅ Cases jouables
+  // Cases jouables
   const validCells = new Set([
     "A4","A5","A6","A7","A8",
     "B4","B5","B6","B7","B8","B9",
@@ -111,148 +131,165 @@
     "I2","I3","I4","I5","I6"
   ]);
 
-  // 🟧 Zone centrale
+  // Zones spéciales
   const orangeZone = new Set(["D5","E4","E5","E6","F5"]);
-
-  // 🏰 Forteresses + zones de départ
   const redFortress  = "I1";
   const blueFortress = "A9";
   const redStart  = new Set(["G1","G2","G3","H1","H2","H3","I2","I3"]);
   const blueStart = new Set(["A8","A7","B9","B8","B7","C9","C8","C7"]);
 
-  // Helpers
-  function toAlg(c,r){ return COLS[c] + (r+1); } // (0,0)->A1
-  function fromAlg(alg){
-    const c = COLS.indexOf(alg[0].toUpperCase());
-    const r = parseInt(alg.slice(1),10)-1;
-    return {c,r};
+  // État des forteresses avec 7 PV chacune
+  const fortresses = {
+    red :  { cell: redFortress,  hp: 7, el: null },
+    blue:  { cell: blueFortress, hp: 7, el: null }
+  };
+
+  // Helper pour obtenir le nom de la forteresse à partir d'une coordonnée
+  function fortressKeyByAlg(alg) {
+    if (alg === fortresses.red.cell) return 'red';
+    if (alg === fortresses.blue.cell) return 'blue';
+    return null;
   }
 
-  // Grille visuelle : on garde 81 cases pour conserver le maillage,
-  // mais on rend invisibles celles qui sont "inexistantes".
-  function buildGrid(){
+  // Conversion (col,row) -> "A1"
+  function toAlg(c, r) {
+    return COLS[c] + (r + 1);
+  }
+  // Conversion "A1" -> {c,r}
+  function fromAlg(alg) {
+    const col = COLS.indexOf(alg[0].toUpperCase());
+    const row = parseInt(alg.slice(1), 10) - 1;
+    return { c: col, r: row };
+  }
+
+  // Construire la grille visuelle
+  function buildGrid() {
     cells.innerHTML = "";
-    for(let r=GRID-1; r>=0; r--){ // haut -> bas (écran)
-      for(let c=0; c<GRID; c++){
-        const alg = toAlg(c,r);
-        const d = document.createElement('div');
+    for (let r = GRID - 1; r >= 0; r--) {
+      for (let c = 0; c < GRID; c++) {
+        const alg = toAlg(c, r);
+        const d   = document.createElement('div');
         d.className = 'cell';
 
         if (forbiddenCells.has(alg)) {
-          // case inexistante : invisible et non interactive
+          // case inexistante : aucune bordure visible, ni clic, ni surlignage
           d.style.background = "transparent";
           d.style.borderTop = "2px solid transparent";
-          d.style.borderLeft = "2px solid transparent";
+          d.style.borderLeft= "2px solid transparent";
           d.style.pointerEvents = "none";
-        } else {
-          // marquages d’info (optionnels)
-          if (orangeZone.has(alg)) d.classList.add('zone-orange');
-          if (redStart.has(alg))   d.classList.add('zone-red');
-          if (blueStart.has(alg))  d.classList.add('zone-blue');
-          if (alg === redFortress)  { d.classList.remove('zone-red'); }   // le cube couvrira visuellement
-          if (alg === blueFortress) { d.classList.remove('zone-blue'); }
+          cells.appendChild(d);
+          continue;
         }
 
+        // Couleurs info
+        if (orangeZone.has(alg)) d.classList.add('zone-orange');
+        if (redStart.has(alg))   d.classList.add('zone-red');
+        if (blueStart.has(alg))  d.classList.add('zone-blue');
+
+        // On laisse les forteresses avec le style de fond coloré (retiré via CSS)
         cells.appendChild(d);
       }
     }
   }
 
-  // Conversion Event -> cellule
-  function cellFromEvent(e){
+  // Convertir un événement souris en indice de cellule
+  function cellFromEvent(e) {
     const rect = board.getBoundingClientRect();
     const size = rect.width;
     const cell = size / GRID;
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x    = e.clientX - rect.left;
+    const y    = e.clientY - rect.top;
 
     let c = Math.floor(x / cell);
-    let rTop = Math.floor(y / cell);      // 0 en haut écran
-    let r = (GRID-1) - rTop;              // 0 en bas plateau
+    let rTop = Math.floor(y / cell);
+    let r = (GRID - 1) - rTop;
 
     // clamp
-    c = Math.max(0, Math.min(GRID-1, c));
-    r = Math.max(0, Math.min(GRID-1, r));
+    c = Math.max(0, Math.min(GRID - 1, c));
+    r = Math.max(0, Math.min(GRID - 1, r));
     return { c, r, cell, rect };
   }
 
-  // Surbrillance : désactivée si case inexistante
-  function placeHighlight(c,r, cell){
-    const alg = toAlg(c,r);
+  // Afficher la surbrillance si la case existe
+  function placeHighlight(c, r, cell) {
+    const alg = toAlg(c, r);
     if (forbiddenCells.has(alg)) {
       highlight.style.display = "none";
       return;
     }
-    const yTop = (GRID-1 - r) * cell;
-    const x = c * cell;
-    highlight.style.left   = x + "px";
-    highlight.style.top    = yTop + "px";
-    highlight.style.width  = cell + "px";
-    highlight.style.height = cell + "px";
+    const top = (GRID - 1 - r) * cell;
+    const left= c * cell;
+    highlight.style.left   = `${left}px`;
+    highlight.style.top    = `${top}px`;
+    highlight.style.width  = `${cell}px`;
+    highlight.style.height = `${cell}px`;
     highlight.style.display = "block";
   }
 
-  // Positionner un carré (cube) exactement sur une case donnée
-  function placeSquareAt(alg, cssClass){
-    const {c,r} = fromAlg(alg);
+  // Placer ou mettre à jour une forteresse visuelle
+  function placeFortress(key) {
+    const f = fortresses[key];
+    const { c, r } = fromAlg(f.cell);
     const rect = board.getBoundingClientRect();
     const cell = rect.width / GRID;
     const x = c * cell;
-    const yTop = (GRID-1 - r) * cell;
+    const top = (GRID - 1 - r) * cell;
 
-    let sq = document.createElement('div');
-    sq.className = 'fortress ' + cssClass;
-    sq.style.left = x + "px";
-    sq.style.top  = yTop + "px";
-    sq.style.width  = cell + "px";
-    sq.style.height = cell + "px";
+    // supprime l'ancienne instance si besoin
+    if (f.el) f.el.remove();
+
+    const sq = document.createElement('div');
+    sq.className = 'fortress ' + key;
+    sq.style.left   = `${x}px`;
+    sq.style.top    = `${top}px`;
+    sq.style.width  = `${cell}px`;
+    sq.style.height = `${cell}px`;
+    sq.textContent  = f.hp;
+
     board.appendChild(sq);
-    return sq;
+    f.el = sq;
   }
 
-  // Interactions
-  hit.addEventListener('mousemove', (e)=>{
-    const {c,r,cell} = cellFromEvent(e);
-    placeHighlight(c,r,cell);
+  // Gérer les interactions
+  hit.addEventListener('mousemove', (e) => {
+    const { c, r, cell } = cellFromEvent(e);
+    placeHighlight(c, r, cell);
   });
-  hit.addEventListener('mouseleave', ()=>{
+  hit.addEventListener('mouseleave', () => {
     highlight.style.display = "none";
   });
-  hit.addEventListener('click', (e)=>{
-    const {c,r} = cellFromEvent(e);
-    const alg = toAlg(c,r);
+  hit.addEventListener('click', (e) => {
+    const { c, r } = cellFromEvent(e);
+    const alg = toAlg(c, r);
 
     if (forbiddenCells.has(alg)) {
-      // Ignoré totalement (pas de clic exploitable)
-      logEl.textContent = "🚫 Case inexistante";
+      // aucune action ni message sur case inexistante
       return;
     }
     if (!validCells.has(alg)) {
-      logEl.textContent = alg + " ❌ Case interdite";
+      logEl.textContent = `${alg} ❌ Case interdite`;
       return;
     }
-    if (alg === redFortress || alg === blueFortress) {
-      logEl.textContent = "🏰 Forteresse : " + alg;
+    // Forteresse cliquée ?
+    const key = fortressKeyByAlg(alg);
+    if (key) {
+      const f = fortresses[key];
+      logEl.textContent = `🏰 Forteresse ${key.toUpperCase()} — ${f.hp} PV`;
       return;
     }
-
-    logEl.textContent = "✅ Clic sur " + alg;
+    logEl.textContent = `✅ Clic sur ${alg}`;
   });
 
-  // Init
+  // Initialisation
   buildGrid();
-  // Placer les cubes-forteresses (taille exacte des cases)
-  placeSquareAt(blueFortress, 'blue');
-  placeSquareAt(redFortress,  'red');
+  placeFortress('blue');
+  placeFortress('red');
 
-  // Recalibrer les tailles au resize (forteresses + highlight)
-  window.addEventListener('resize', ()=>{
+  // Au redimensionnement, recalculer la taille des forteresses et cacher la surbrillance
+  window.addEventListener('resize', () => {
     highlight.style.display = "none";
-    // reposer les forteresses aux bonnes dimensions
-    const olds = Array.from(document.querySelectorAll('.fortress'));
-    olds.forEach(el => el.remove());
-    placeSquareAt(blueFortress, 'blue');
-    placeSquareAt(redFortress,  'red');
+    placeFortress('blue');
+    placeFortress('red');
   });
 </script>
 </body>
