@@ -80,6 +80,16 @@ const validCells = new Set([
   "I2","I3","I4","I5","I6"
 ]);
 
+// ❌ Cases inexistantes
+const forbiddenCells = new Set([
+  "A1","B1","C1",
+  "A2","B2","C2",
+  "A3","B3",
+  "G9","H9","I9",
+  "G8","H8","I8",
+  "H7","I7"
+]);
+
 const orangeZone = new Set(["D5","E4","E5","E6","F5"]);
 
 const redFortress = "I1";
@@ -92,12 +102,22 @@ function buildGrid(){
   cells.innerHTML = "";
   for(let r=GRID-1; r>=0; r--){ // haut → bas
     for(let c=0; c<GRID; c++){
-      const d = document.createElement('div');
-      d.className = 'cell';
       const alg = toAlg(c,r);
 
+      // 🔴 On saute les cases inexistantes
+      if(forbiddenCells.has(alg)){
+        const empty = document.createElement('div');
+        empty.style.background = "transparent";
+        cells.appendChild(empty);
+        continue;
+      }
+
+      const d = document.createElement('div');
+      d.className = 'cell';
+
       if(!validCells.has(alg)){
-        d.style.background = "rgba(200,0,0,0.15)"; // ❌ interdit
+        d.style.background = "transparent"; // aucune couleur pour interdit
+        d.style.pointerEvents = "none";     // pas cliquable
       }
       if(orangeZone.has(alg)){
         d.style.background = "rgba(255,140,0,0.3)"; // 🟧 zone orange
