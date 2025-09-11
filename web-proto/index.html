@@ -2061,19 +2061,15 @@ if ((occ.unit.hp || 0) >= 2) {
   initGame();
   </script>
 <script type="module">
-/* KOIKOS: Firebase realtime networking */
-(async () => {
-  try {
-    // OPTIONAL: Fill your Firebase Web config here to enable online 2‑player mode.
-    // You can find this in Firebase Console > Project Settings > "Your apps" (Web).
-    const firebaseConfig = {
-      apiKey: "PASTE_API_KEY",
-      authDomain: "PASTE_PROJECT.firebaseapp.com",
-      projectId: "PASTE_PROJECT_ID",
-      storageBucket: "PASTE_PROJECT.appspot.com",
-      messagingSenderId: "PASTE_SENDER_ID",
-      appId: "PASTE_APP_ID"
-    };
+  // ===== Firebase config (Spark gratuit) =====
+  const firebaseConfig = {
+    authDomain: "la-forteresse-1v1.firebaseapp.com",
+    databaseURL: "https://la-forteresse-1v1-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "la-forteresse-1v1",
+    storageBucket: "la-forteresse-1v1.firebasestorage.app",
+    messagingSenderId: "1054155576025",
+    appId: "1:1054155576025:web:b33640206bd45ebe4564c8",
+  };
     if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "PASTE_API_KEY") {
       console.warn("Firebase not configured. Multiplayer disabled until you paste your firebaseConfig.");
       return;
