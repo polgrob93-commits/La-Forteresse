@@ -2201,5 +2201,182 @@ if ((occ.unit.hp || 0) >= 2) {
   }
 })();
 </script>
+
+<!-- Multiplayer sync (Firebase) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+  import { getDatabase, ref, set, onValue, serverTimestamp, onDisconnect } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+
+  // ===== Firebase config (Spark gratuit) =====
+  const firebaseConfig = {
+    apiKey: "AIzaSyDoT2Y99OlnLQtTCpx5WJZPnHqYB2HAgiQ",
+    authDomain: "la-forteresse-1v1.firebaseapp.com",
+    databaseURL: "https://la-forteresse-1v1-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "la-forteresse-1v1",
+    storageBucket: "la-forteresse-1v1.firebasestorage.app",
+    messagingSenderId: "1054155576025",
+    appId: "1:1054155576025:web:b33640206bd45ebe4564c8",
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getDatabase(app);
+
+  // ===== Room helpers =====
+  function getRoomId(){
+    const h = (location.hash || "").replace(/^#/, "").trim();
+    return h || "public";
+  }
+  function setRoomId(id){
+    location.hash = id;
+  }
+
+  // ===== Serialize / Apply subset of game state =====
+  function serializeGame(){
+    try{
+      return {
+        turn: state?.turn ?? 0,
+        active: state?.active ?? "blue",
+        phase: state?.phase ?? "préparation",
+        blue: {
+          fortHP: state?.pieces?.blue?.fortHP ?? 10,
+          pieces: (state?.pieces?.blue?.pieces || []).map(u => ({ id:u.id, cell:u.cell || null, hp:u.hp ?? 2 }))
+        },
+        red: {
+          fortHP: state?.pieces?.red?.fortHP ?? 10,
+          pieces: (state?.pieces?.red?.pieces || []).map(u => ({ id:u.id, cell:u.cell || null, hp:u.hp ?? 2 }))
+        },
+        blocks: Array.from(state?.blocks || []),
+        // Tiles (without hidden info except "revealed" flag + kind)
+        tiles: Object.fromEntries(
+          Object.entries(state?.tiles || {}).map(([k,t]) => [k, { kind: t.kind, revealed: !!t.revealed }])
+        ),
+        rev: Date.now()
+      };
+    }catch(e){
+      console.warn("serializeGame failed", e);
+      return { rev: Date.now() };
+    }
+  }
+
+  function applyGame(s){
+    if(!s) return;
+    try{
+      state.turn   = s.turn ?? state.turn;
+      state.active = s.active ?? state.active;
+      state.phase  = s.phase ?? state.phase;
+      if(s.blue){
+        state.pieces.blue.fortHP = s.blue.fortHP ?? state.pieces.blue.fortHP;
+        // map by id
+        const idx = Object.fromEntries((state.pieces.blue.pieces || []).map((u,i)=>[u.id,i]));
+        (s.blue.pieces || []).forEach(sp => {
+          const i = idx[sp.id];
+          if(i !== undefined){
+            state.pieces.blue.pieces[i].cell = sp.cell ?? state.pieces.blue.pieces[i].cell;
+            state.pieces.blue.pieces[i].hp   = sp.hp   ?? state.pieces.blue.pieces[i].hp;
+          }
+        });
+      }
+      if(s.red){
+        state.pieces.red.fortHP = s.red.fortHP ?? state.pieces.red.fortHP;
+        const idx = Object.fromEntries((state.pieces.red.pieces || []).map((u,i)=>[u.id,i]));
+        (s.red.pieces || []).forEach(sp => {
+          const i = idx[sp.id];
+          if(i !== undefined){
+            state.pieces.red.pieces[i].cell = sp.cell ?? state.pieces.red.pieces[i].cell;
+            state.pieces.red.pieces[i].hp   = sp.hp   ?? state.pieces.red.pieces[i].hp;
+          }
+        });
+      }
+      // blocks / tiles
+      state.blocks = new Set(s.blocks || []);
+      state.tiles  = s.tiles  || state.tiles;
+
+      // Render after apply
+      if(typeof renderBoard === "function") renderBoard();
+      if(typeof renderHands === "function") renderHands();
+      if(typeof renderTop === "function") renderTop();
+    }catch(e){
+      console.warn("applyGame failed", e);
+    }
+  }
+
+  // ===== Sync wiring =====
+  let lastRev = 0;
+  let isApplyingRemote = false;
+  let currentRoomRef = null;
+
+  function broadcastNow(){
+    if(isApplyingRemote) return; // don't echo remote updates
+    const payload = serializeGame();
+    lastRev = payload.rev;
+    if(currentRoomRef){
+      set(currentRoomRef, payload);
+    }
+  }
+
+  // Debounce helper to avoid flooding writes
+  let saveTimer = null;
+  function broadcastDebounced(){
+    if(isApplyingRemote) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(broadcastNow, 120);
+  }
+
+  // Monkey-patch renderBoard to auto-broadcast after local changes
+  if(typeof renderBoard === "function"){
+    const _renderBoard = renderBoard;
+    window.renderBoard = function(){
+      _renderBoard();
+      broadcastDebounced();
+    }
+  }
+
+  // Also broadcast on end-turn button clicks if present
+  document.addEventListener("click", (ev)=>{
+    const id = (ev.target && ev.target.id) ? ev.target.id : "";
+    if(id === "btnEndTurn" || id === "btnReadyBlue" || id === "btnReadyRed"){
+      setTimeout(broadcastNow, 50);
+    }
+  });
+
+  // ===== Start auth + listeners =====
+  signInAnonymously(auth).catch(()=>{});
+  onAuthStateChanged(auth, (u)=>{
+    if(!u) return;
+    const rid = getRoomId();
+    const base = ref(db, `rooms/${rid}`);
+    // presence
+    const pRef = ref(db, `rooms/${rid}/players/${u.uid}`);
+    set(pRef, { joinedAt: serverTimestamp() });
+    onDisconnect(pRef).remove();
+
+    // state
+    currentRoomRef = ref(db, `rooms/${rid}/state`);
+    onValue(currentRoomRef, (snap)=>{
+      const data = snap.val();
+      if(!data) return;
+      if(data.rev && data.rev <= lastRev) return; // ignore our own echo
+      isApplyingRemote = true;
+      applyGame(data);
+      lastRev = data.rev || Date.now();
+      isApplyingRemote = false;
+    });
+
+    // If no state yet, publish our current one as initial
+    onValue(currentRoomRef, (snap)=>{
+      if(!snap.exists()){
+        broadcastNow();
+      }
+    }, { onlyOnce: true });
+
+    // Generate a short room id if none in URL
+    if(!location.hash){
+      setRoomId(crypto.randomUUID().slice(0,6));
+    }
+  });
+</script>
+
 </body>
 </html>
